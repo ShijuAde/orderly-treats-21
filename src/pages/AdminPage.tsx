@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { useCartStore, Order } from '@/store/cartStore';
 import { formatPrice } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { notifyOrderStatus } from '@/lib/whatsapp';
 
 const nextStatus: Record<string, Order['status'] | null> = {
   pending: 'processing',

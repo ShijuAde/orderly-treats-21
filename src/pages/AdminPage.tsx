@@ -47,6 +47,9 @@ const AdminPage = () => {
       title: `Order ${order.id} updated`,
       description: `Status changed to ${statusLabels[next]}`,
     });
+
+    // Notify customer via WhatsApp (fire-and-forget)
+    notifyOrderStatus(order.customerPhone, order.id, next);
   };
 
   const activeOrders = orders.filter((o) => o.status !== 'delivered');

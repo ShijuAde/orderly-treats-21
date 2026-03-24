@@ -43,6 +43,10 @@ const CartPage = () => {
     clearCart();
 
     toast({ title: '🎉 Order placed!', description: `Order ${order.id} confirmed.` });
+
+    // Notify restaurant via WhatsApp (fire-and-forget)
+    notifyNewOrder(order);
+
     navigate('/orders');
   };
 

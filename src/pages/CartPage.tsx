@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useCartStore } from '@/store/cartStore';
 import { formatPrice, generateOrderId } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { notifyNewOrder } from '@/lib/whatsapp';
 
 const CartPage = () => {
   const { items, updateQuantity, removeItem, clearCart, getTotal, addOrder } = useCartStore();
@@ -42,6 +43,10 @@ const CartPage = () => {
     clearCart();
 
     toast({ title: '🎉 Order placed!', description: `Order ${order.id} confirmed.` });
+
+    // Notify restaurant via WhatsApp (fire-and-forget)
+    notifyNewOrder(order);
+
     navigate('/orders');
   };
 

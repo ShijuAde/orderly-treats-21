@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { useCartStore, Order } from '@/store/cartStore';
 import { formatPrice } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { notifyOrderStatus } from '@/lib/whatsapp';
 
 const nextStatus: Record<string, Order['status'] | null> = {
   pending: 'processing',
@@ -46,6 +47,9 @@ const AdminPage = () => {
       title: `Order ${order.id} updated`,
       description: `Status changed to ${statusLabels[next]}`,
     });
+
+    // Notify customer via WhatsApp (fire-and-forget)
+    notifyOrderStatus(order.customerPhone, order.id, next);
   };
 
   const activeOrders = orders.filter((o) => o.status !== 'delivered');

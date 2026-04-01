@@ -1,53 +1,96 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Trash2, Plus, Minus, ShoppingBag, ArrowLeft } from 'lucide-react';
+import { Trash2, Plus, Minus, ShoppingBag, ArrowLeft, MapPin, Store } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useCartStore } from '@/store/cartStore';
 import { formatPrice, generateOrderId } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { notifyNewOrder } from '@/lib/whatsapp';
+import { payWithPaystack } from '@/lib/paystack';
+
+const RESTAURANT_WHATSAPP = '2347089989283';
 
 const CartPage = () => {
   const { items, updateQuantity, removeItem, clearCart, getTotal, addOrder } = useCartStore();
   const { toast } = useToast();
-  const navigate = useNavigate();
 
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
+  const [fulfillment, setFulfillment] = useState<'delivery' | 'pickup'>('delivery');
+  const [paying, setPaying] = useState(false);
 
   const total = getTotal();
 
+  const buildWhatsAppMessage = (orderId: string) => {
+    const itemsList = items
+      .map((i) => `• ${i.name} × ${i.quantity} — ₦${(i.price * i.quantity).toLocaleString()}`)
+      .join('\n');
+
+    const type = fulfillment === 'delivery' ? '🚗 Delivery' : '🏪 Pickup';
+
+    let msg = `✅ *Order Confirmed!*\n\nOrder: ${orderId}\nName: ${customerName}\nPhone: ${customerPhone}\nType: ${type}\n\n${itemsList}\n\n*Total: ₦${total.toLocaleString()}*\n\n`;
+
+    if (fulfillment === 'delivery') {
+      msg += `📍 *Delivery Address:* ${customerAddress}\n\nPlease confirm your address is correct so we can dispatch your order! 🙏`;
+    } else {
+      msg += `Please confirm your pickup order and we'll have it ready for you! 🙏`;
+    }
+
+    return msg;
+  };
+
   const handleCheckout = () => {
-    if (!customerName || !customerPhone || !customerAddress) {
-      toast({ title: 'Please fill in all delivery details', variant: 'destructive' });
+    if (!customerName || !customerPhone || !customerEmail) {
+      toast({ title: 'Please fill in all required details', variant: 'destructive' });
+      return;
+    }
+    if (fulfillment === 'delivery' && !customerAddress) {
+      toast({ title: 'Please enter your delivery address', variant: 'destructive' });
       return;
     }
 
-    const order = {
-      id: generateOrderId(),
-      items: [...items],
-      total,
-      status: 'pending' as const,
-      date: new Date().toISOString(),
-      customerName,
-      customerPhone,
-      customerAddress,
-    };
+    setPaying(true);
 
-    addOrder(order);
-    clearCart();
+    payWithPaystack({
+      email: customerEmail,
+      amount: total * 100, // kobo
+      onSuccess: (reference) => {
+        const orderId = generateOrderId();
 
-    toast({ title: '🎉 Order placed!', description: `Order ${order.id} confirmed.` });
+        const order = {
+          id: orderId,
+          items: [...items],
+          total,
+          status: 'pending' as const,
+          date: new Date().toISOString(),
+          customerName,
+          customerPhone,
+          customerAddress: fulfillment === 'delivery' ? customerAddress : 'Pickup',
+        };
 
-    // Notify restaurant via WhatsApp (fire-and-forget)
-    notifyNewOrder(order);
+        addOrder(order);
+        clearCart();
 
-    navigate('/orders');
+        toast({ title: '🎉 Payment successful!', description: `Ref: ${reference}` });
+
+        // Redirect to WhatsApp
+        const message = buildWhatsAppMessage(orderId);
+        const whatsappUrl = `https://wa.me/${RESTAURANT_WHATSAPP}?text=${encodeURIComponent(message)}`;
+        window.open(whatsappUrl, '_blank');
+
+        setPaying(false);
+      },
+      onClose: () => {
+        setPaying(false);
+        toast({ title: 'Payment cancelled', description: 'You can try again when ready.' });
+      },
+    });
   };
 
   if (items.length === 0) {
@@ -126,9 +169,45 @@ const CartPage = () => {
 
           {/* Summary & checkout */}
           <div className="space-y-4">
+            {/* Fulfillment type */}
             <Card>
               <CardHeader>
-                <CardTitle className="font-serif">Delivery Details</CardTitle>
+                <CardTitle className="font-serif">How do you want your order?</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <RadioGroup
+                  value={fulfillment}
+                  onValueChange={(v) => setFulfillment(v as 'delivery' | 'pickup')}
+                  className="grid grid-cols-2 gap-3"
+                >
+                  <Label
+                    htmlFor="delivery"
+                    className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
+                      fulfillment === 'delivery' ? 'border-primary bg-primary/5' : 'border-muted'
+                    }`}
+                  >
+                    <RadioGroupItem value="delivery" id="delivery" className="sr-only" />
+                    <MapPin className="h-6 w-6 text-primary" />
+                    <span className="text-sm font-medium">Delivery</span>
+                  </Label>
+                  <Label
+                    htmlFor="pickup"
+                    className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
+                      fulfillment === 'pickup' ? 'border-primary bg-primary/5' : 'border-muted'
+                    }`}
+                  >
+                    <RadioGroupItem value="pickup" id="pickup" className="sr-only" />
+                    <Store className="h-6 w-6 text-primary" />
+                    <span className="text-sm font-medium">Pickup</span>
+                  </Label>
+                </RadioGroup>
+              </CardContent>
+            </Card>
+
+            {/* Customer details */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="font-serif">Your Details</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div>
@@ -136,16 +215,23 @@ const CartPage = () => {
                   <Input id="name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="John Doe" />
                 </div>
                 <div>
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="john@example.com" />
+                </div>
+                <div>
                   <Label htmlFor="phone">Phone Number</Label>
                   <Input id="phone" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="+234..." />
                 </div>
-                <div>
-                  <Label htmlFor="address">Delivery Address</Label>
-                  <Input id="address" value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} placeholder="123 Main St, Lagos" />
-                </div>
+                {fulfillment === 'delivery' && (
+                  <div>
+                    <Label htmlFor="address">Delivery Address</Label>
+                    <Input id="address" value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} placeholder="123 Main St, Lagos" />
+                  </div>
+                )}
               </CardContent>
             </Card>
 
+            {/* Order summary */}
             <Card>
               <CardHeader>
                 <CardTitle className="font-serif">Order Summary</CardTitle>
@@ -163,8 +249,8 @@ const CartPage = () => {
                     <span className="text-primary">{formatPrice(total)}</span>
                   </div>
                 </div>
-                <Button className="mt-4 w-full" size="lg" onClick={handleCheckout}>
-                  Place Order — {formatPrice(total)}
+                <Button className="mt-4 w-full" size="lg" onClick={handleCheckout} disabled={paying}>
+                  {paying ? 'Processing…' : `Pay ${formatPrice(total)}`}
                 </Button>
               </CardContent>
             </Card>

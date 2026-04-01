@@ -17,6 +17,7 @@ const Navbar = () => {
     { to: '/reviews', label: 'Reviews' },
   ];
 
+
   const isActive = (path: string) => location.pathname === path;
 
   return (

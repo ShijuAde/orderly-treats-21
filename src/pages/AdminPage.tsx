@@ -127,11 +127,26 @@ const AdminPage = () => {
   const handleSave = async () => {
     if (!form.name || !form.price) return;
     setSaving(true);
+
+    let imageUrl = form.image;
+    if (imageFile) {
+      try {
+        setUploading(true);
+        imageUrl = await uploadImage(imageFile);
+        setUploading(false);
+      } catch (err: any) {
+        setUploading(false);
+        setSaving(false);
+        toast({ title: 'Upload failed', description: err.message, variant: 'destructive' });
+        return;
+      }
+    }
+
     const payload = {
       name: form.name,
       description: form.description,
       price: parseInt(form.price) || 0,
-      image: form.image,
+      image: imageUrl,
       category: form.category,
     };
 

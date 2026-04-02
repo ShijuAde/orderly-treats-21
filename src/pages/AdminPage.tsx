@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Package, ChevronRight, Shield, Plus, Pencil, Trash2, LogOut, UtensilsCrossed } from 'lucide-react';
+import { Package, ChevronRight, Shield, Plus, Pencil, Trash2, LogOut, UtensilsCrossed, Upload, ImageIcon } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -56,6 +56,8 @@ interface MenuFormData {
 
 const emptyForm: MenuFormData = { name: '', description: '', price: '', image: '', category: 'Main Dishes' };
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
 const AdminPage = () => {
   const { user, loading: authLoading, signOut } = useAuth();
   const { orders, updateOrderStatus } = useCartStore();
@@ -67,6 +69,10 @@ const AdminPage = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<MenuFormData>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (authLoading) return <div className="flex min-h-[60vh] items-center justify-center text-muted-foreground">Loading…</div>;
   if (!user) return <Navigate to="/admin/login" replace />;
@@ -82,23 +88,65 @@ const AdminPage = () => {
   const openCreate = () => {
     setEditingId(null);
     setForm(emptyForm);
+    setImageFile(null);
+    setImagePreview(null);
     setFormOpen(true);
   };
 
   const openEdit = (item: any) => {
     setEditingId(item.id);
     setForm({ name: item.name, description: item.description, price: String(item.price), image: item.image, category: item.category });
+    setImageFile(null);
+    setImagePreview(item.image || null);
     setFormOpen(true);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast({ title: 'Invalid file', description: 'Please select an image file', variant: 'destructive' });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: 'File too large', description: 'Maximum size is 5MB', variant: 'destructive' });
+      return;
+    }
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+  };
+
+  const uploadImage = async (file: File): Promise<string> => {
+    const ext = file.name.split('.').pop();
+    const fileName = `${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage.from('menu-images').upload(fileName, file);
+    if (error) throw error;
+    return `${SUPABASE_URL}/storage/v1/object/public/menu-images/${fileName}`;
   };
 
   const handleSave = async () => {
     if (!form.name || !form.price) return;
     setSaving(true);
+
+    let imageUrl = form.image;
+    if (imageFile) {
+      try {
+        setUploading(true);
+        imageUrl = await uploadImage(imageFile);
+        setUploading(false);
+      } catch (err: any) {
+        setUploading(false);
+        setSaving(false);
+        toast({ title: 'Upload failed', description: err.message, variant: 'destructive' });
+        return;
+      }
+    }
+
     const payload = {
       name: form.name,
       description: form.description,
       price: parseInt(form.price) || 0,
-      image: form.image,
+      image: imageUrl,
       category: form.category,
     };
 
@@ -256,14 +304,41 @@ const AdminPage = () => {
                       </div>
                     </div>
                     <div>
-                      <Label>Image URL</Label>
-                      <Input value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} placeholder="https://..." />
+                      <Label>Image</Label>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileSelect}
+                        className="hidden"
+                      />
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/30 p-4 transition-colors hover:border-primary hover:bg-muted/50"
+                      >
+                        {imagePreview ? (
+                          <img src={imagePreview} alt="Preview" className="h-32 w-full rounded-lg object-cover" />
+                        ) : (
+                          <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                            <Upload className="h-8 w-8" />
+                            <span className="text-sm">Click to upload image</span>
+                            <span className="text-xs">JPG, PNG, WebP · Max 5MB</span>
+                          </div>
+                        )}
+                      </div>
+                      {imagePreview && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mt-1 text-xs text-muted-foreground"
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          Change image
+                        </Button>
+                      )}
                     </div>
-                    {form.image && (
-                      <img src={form.image} alt="Preview" className="h-32 w-full rounded-lg object-cover" />
-                    )}
-                    <Button onClick={handleSave} disabled={saving} className="w-full">
-                      {saving ? 'Saving…' : editingId ? 'Update Item' : 'Create Item'}
+                    <Button onClick={handleSave} disabled={saving || uploading} className="w-full">
+                      {uploading ? 'Uploading image…' : saving ? 'Saving…' : editingId ? 'Update Item' : 'Create Item'}
                     </Button>
                   </div>
                 </DialogContent>

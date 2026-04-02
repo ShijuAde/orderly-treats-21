@@ -304,14 +304,41 @@ const AdminPage = () => {
                       </div>
                     </div>
                     <div>
-                      <Label>Image URL</Label>
-                      <Input value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} placeholder="https://..." />
+                      <Label>Image</Label>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileSelect}
+                        className="hidden"
+                      />
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/30 p-4 transition-colors hover:border-primary hover:bg-muted/50"
+                      >
+                        {imagePreview ? (
+                          <img src={imagePreview} alt="Preview" className="h-32 w-full rounded-lg object-cover" />
+                        ) : (
+                          <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                            <Upload className="h-8 w-8" />
+                            <span className="text-sm">Click to upload image</span>
+                            <span className="text-xs">JPG, PNG, WebP · Max 5MB</span>
+                          </div>
+                        )}
+                      </div>
+                      {imagePreview && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mt-1 text-xs text-muted-foreground"
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          Change image
+                        </Button>
+                      )}
                     </div>
-                    {form.image && (
-                      <img src={form.image} alt="Preview" className="h-32 w-full rounded-lg object-cover" />
-                    )}
-                    <Button onClick={handleSave} disabled={saving} className="w-full">
-                      {saving ? 'Saving…' : editingId ? 'Update Item' : 'Create Item'}
+                    <Button onClick={handleSave} disabled={saving || uploading} className="w-full">
+                      {uploading ? 'Uploading image…' : saving ? 'Saving…' : editingId ? 'Update Item' : 'Create Item'}
                     </Button>
                   </div>
                 </DialogContent>

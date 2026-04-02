@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Package, ChevronRight, Shield, Plus, Pencil, Trash2, LogOut, UtensilsCrossed } from 'lucide-react';
+import { Package, ChevronRight, Shield, Plus, Pencil, Trash2, LogOut, UtensilsCrossed, Upload, ImageIcon } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

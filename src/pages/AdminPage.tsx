@@ -56,6 +56,8 @@ interface MenuFormData {
 
 const emptyForm: MenuFormData = { name: '', description: '', price: '', image: '', category: 'Main Dishes' };
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
 const AdminPage = () => {
   const { user, loading: authLoading, signOut } = useAuth();
   const { orders, updateOrderStatus } = useCartStore();

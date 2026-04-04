@@ -23,7 +23,7 @@ const Index = () => {
             <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
               <span className="inline-block rounded-full bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary">🔥 Fresh & Delicious</span>
               <h1 className="mt-6 font-serif text-4xl font-bold leading-tight md:text-6xl">
-                Taste the soul of <span className="text-primary">Nigerian cuisine</span>
+                Taste the soul of <span className="text-primary">Nigerian cuisines</span>
               </h1>
               <p className="mt-4 text-lg text-muted-foreground">
                 Order authentic, home-style meals from Bellefood. From jollof rice to suya, we deliver flavour straight to your door.

@@ -18,6 +18,7 @@ const RESTAURANT_WHATSAPP = '2347089989283';
 const CartPage = () => {
   const { items, updateQuantity, removeItem, clearCart, getTotal, addOrder } = useCartStore();
   const { toast } = useToast();
+  const { data: paystackKey } = useSetting('paystack_public_key');
 
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');

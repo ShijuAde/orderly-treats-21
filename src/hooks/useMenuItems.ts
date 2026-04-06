@@ -17,6 +17,7 @@ export function useMenuItems() {
         description: row.description,
         price: row.price,
         image: row.image,
+        images: row.images || [],
         category: row.category,
       }));
     },

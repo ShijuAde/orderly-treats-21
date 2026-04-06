@@ -11,12 +11,14 @@ import { useCartStore } from '@/store/cartStore';
 import { formatPrice, generateOrderId } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { payWithPaystack } from '@/lib/paystack';
+import { useSetting } from '@/hooks/useSettings';
 
 const RESTAURANT_WHATSAPP = '2347089989283';
 
 const CartPage = () => {
   const { items, updateQuantity, removeItem, clearCart, getTotal, addOrder } = useCartStore();
   const { toast } = useToast();
+  const { data: paystackKey } = useSetting('paystack_public_key');
 
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -55,11 +57,17 @@ const CartPage = () => {
       return;
     }
 
+    if (!paystackKey) {
+      toast({ title: 'Payment not configured', description: 'Please contact the admin.', variant: 'destructive' });
+      return;
+    }
+
     setPaying(true);
 
     payWithPaystack({
       email: customerEmail,
       amount: total * 100, // kobo
+      publicKey: paystackKey,
       onSuccess: (reference) => {
         const orderId = generateOrderId();
 

@@ -1,7 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Package, ChevronRight, Shield, Plus, Pencil, Trash2, LogOut, Upload, Settings, X } from 'lucide-react';
+import { Package, ChevronRight, Shield, Plus, Pencil, Trash2, LogOut, Upload, Settings, X, Users, UserX, UserCheck } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { useCartStore, Order } from '@/store/cartStore';
 import { formatPrice } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { notifyOrderStatus } from '@/lib/whatsapp';
@@ -20,7 +19,22 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-const nextStatus: Record<string, Order['status'] | null> = {
+interface DbOrder {
+  id: string;
+  order_number: string;
+  items: any[];
+  total: number;
+  status: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
+  customer_address: string;
+  fulfillment: string;
+  payment_reference: string;
+  created_at: string;
+}
+
+const nextStatus: Record<string, string | null> = {
   pending: 'processing',
   processing: 'out-for-delivery',
   'out-for-delivery': 'delivered',
@@ -60,9 +74,17 @@ const emptyForm: MenuFormData = { name: '', description: '', price: '', image: '
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
+interface AppUser {
+  id: string;
+  email?: string;
+  phone?: string;
+  created_at: string;
+  user_metadata?: { full_name?: string };
+  banned_until?: string;
+}
+
 const AdminPage = () => {
-  const { user, loading: authLoading, signOut } = useAuth();
-  const { orders, updateOrderStatus } = useCartStore();
+  const { user, session, loading: authLoading, signOut } = useAuth();
   const { toast } = useToast();
   const { data: menuItems = [], isLoading: menuLoading } = useMenuItems();
   const { data: settings = {} } = useSettings();
@@ -80,23 +102,102 @@ const AdminPage = () => {
 
   // Settings state
   const [paystackKey, setPaystackKey] = useState('');
+  const [whatsappNumber, setWhatsappNumber] = useState('');
+  const [deliveryFee, setDeliveryFee] = useState('');
+  const [restaurantName, setRestaurantName] = useState('');
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  // Orders from DB
+  const [orders, setOrders] = useState<DbOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+
+  // Users
+  const [appUsers, setAppUsers] = useState<AppUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
 
   // Sync settings to local state once
   if (!settingsLoaded && settings.paystack_public_key !== undefined) {
     setPaystackKey(settings.paystack_public_key || '');
+    setWhatsappNumber(settings.whatsapp_number || '');
+    setDeliveryFee(settings.delivery_fee || '');
+    setRestaurantName(settings.restaurant_name || '');
     setSettingsLoaded(true);
   }
+
+  // Fetch orders from DB
+  useEffect(() => {
+    const fetchOrders = async () => {
+      const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+      setOrders((data as any) || []);
+      setOrdersLoading(false);
+    };
+    fetchOrders();
+
+    const channel = supabase
+      .channel('admin-orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => { fetchOrders(); })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  // Fetch users
+  const fetchUsers = async () => {
+    if (!session) return;
+    setUsersLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-users', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: null,
+        method: 'GET',
+      });
+      // Use query params via custom fetch
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-users?action=list`, {
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+      });
+      const json = await res.json();
+      if (json.users) {
+        setAppUsers(json.users.filter((u: any) => u.email !== 'shijuadeoyenuga@gmail.com'));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    setUsersLoading(false);
+  };
+
+  const toggleUserDisabled = async (userId: string, disable: boolean) => {
+    if (!session) return;
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-users?action=disable`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, disabled: disable }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({ title: disable ? 'User disabled' : 'User enabled' });
+        fetchUsers();
+      } else {
+        toast({ title: 'Error', description: json.error, variant: 'destructive' });
+      }
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+  };
 
   if (authLoading) return <div className="flex min-h-[60vh] items-center justify-center text-muted-foreground">Loading…</div>;
   if (!user) return <Navigate to="/admin/login" replace />;
 
-  const handleAdvance = (order: Order) => {
+  const handleAdvance = async (order: DbOrder) => {
     const next = nextStatus[order.status];
     if (!next) return;
-    updateOrderStatus(order.id, next);
-    toast({ title: `Order ${order.id} updated`, description: `Status changed to ${statusLabels[next]}` });
-    notifyOrderStatus(order.customerPhone, order.id, next);
+    const { error } = await supabase.from('orders').update({ status: next, updated_at: new Date().toISOString() }).eq('id', order.id);
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } else {
+      toast({ title: `Order ${order.order_number} updated`, description: `Status changed to ${statusLabels[next]}` });
+      notifyOrderStatus(order.customer_phone, order.order_number, next as any);
+    }
   };
 
   const openCreate = () => {
@@ -119,7 +220,6 @@ const AdminPage = () => {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
-    
     for (const file of files) {
       if (!file.type.startsWith('image/')) {
         toast({ title: 'Invalid file', description: 'Please select image files only', variant: 'destructive' });
@@ -130,18 +230,14 @@ const AdminPage = () => {
         return;
       }
     }
-
     setImageFiles((prev) => [...prev, ...files]);
     const newPreviews = files.map((f) => URL.createObjectURL(f));
     setImagePreviews((prev) => [...prev, ...newPreviews]);
-    
-    // Reset file input
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const removeImage = (index: number) => {
     setImagePreviews((prev) => prev.filter((_, i) => i !== index));
-    // If it was a new file (index >= existing images count)
     const existingCount = form.images.length;
     if (index >= existingCount) {
       setImageFiles((prev) => prev.filter((_, i) => i !== (index - existingCount)));
@@ -161,9 +257,7 @@ const AdminPage = () => {
   const handleSave = async () => {
     if (!form.name || !form.price) return;
     setSaving(true);
-
     let allImageUrls = [...form.images];
-
     if (imageFiles.length > 0) {
       try {
         setUploading(true);
@@ -177,7 +271,6 @@ const AdminPage = () => {
         return;
       }
     }
-
     const payload = {
       name: form.name,
       description: form.description,
@@ -186,7 +279,6 @@ const AdminPage = () => {
       images: allImageUrls,
       category: form.category,
     };
-
     let error;
     if (editingId) {
       ({ error } = await supabase.from('menu_items').update(payload).eq('id', editingId));
@@ -194,7 +286,6 @@ const AdminPage = () => {
       ({ error } = await supabase.from('menu_items').insert(payload));
     }
     setSaving(false);
-
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
@@ -216,7 +307,12 @@ const AdminPage = () => {
 
   const handleSaveSettings = async () => {
     try {
-      await upsertSetting.mutateAsync({ key: 'paystack_public_key', value: paystackKey });
+      await Promise.all([
+        upsertSetting.mutateAsync({ key: 'paystack_public_key', value: paystackKey }),
+        upsertSetting.mutateAsync({ key: 'whatsapp_number', value: whatsappNumber }),
+        upsertSetting.mutateAsync({ key: 'delivery_fee', value: deliveryFee }),
+        upsertSetting.mutateAsync({ key: 'restaurant_name', value: restaurantName }),
+      ]);
       toast({ title: 'Settings saved!' });
     } catch (err: any) {
       toast({ title: 'Error saving settings', description: err.message, variant: 'destructive' });
@@ -240,80 +336,88 @@ const AdminPage = () => {
         </div>
 
         <Tabs defaultValue="orders" className="mt-6">
-          <TabsList>
+          <TabsList className="flex-wrap">
             <TabsTrigger value="orders">Orders</TabsTrigger>
             <TabsTrigger value="menu">Menu Items</TabsTrigger>
+            <TabsTrigger value="users" className="gap-1" onClick={fetchUsers}><Users className="h-4 w-4" /> Users</TabsTrigger>
             <TabsTrigger value="settings" className="gap-1"><Settings className="h-4 w-4" /> Settings</TabsTrigger>
           </TabsList>
 
           {/* ORDERS TAB */}
           <TabsContent value="orders">
-            <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-              {['pending', 'processing', 'out-for-delivery', 'delivered'].map((status) => (
-                <Card key={status}>
-                  <CardContent className="p-4 text-center">
-                    <div className="text-2xl font-bold">{orders.filter((o) => o.status === status).length}</div>
-                    <div className="text-xs text-muted-foreground">{statusLabels[status]}</div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-
-            <h2 className="mt-8 font-serif text-xl font-bold">Active Orders ({activeOrders.length})</h2>
-            <div className="mt-4 space-y-4">
-              {activeOrders.length === 0 && <p className="py-8 text-center text-muted-foreground">No active orders 🎉</p>}
-              {activeOrders.map((order, i) => (
-                <motion.div key={order.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
-                  <Card>
-                    <CardContent className="p-5">
-                      <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3">
-                            <Package className="h-5 w-5 text-muted-foreground" />
-                            <span className="font-semibold">{order.id}</span>
-                            <Badge className={statusColors[order.status]}>{statusLabels[order.status]}</Badge>
-                          </div>
-                          <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                            <p>👤 {order.customerName} · 📞 {order.customerPhone}</p>
-                            <p>📍 {order.customerAddress}</p>
-                            <p>🕐 {new Date(order.date).toLocaleString()}</p>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {order.items.map((item) => (
-                              <span key={item.id} className="rounded-full bg-secondary px-3 py-1 text-xs">{item.name} × {item.quantity}</span>
-                            ))}
-                          </div>
-                          <p className="mt-2 text-lg font-bold text-primary">{formatPrice(order.total)}</p>
-                        </div>
-                        {nextStatus[order.status] && (
-                          <Button onClick={() => handleAdvance(order)} className="gap-1 shrink-0">
-                            {nextActionLabel[order.status]}
-                            <ChevronRight className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
-            </div>
-
-            {completedOrders.length > 0 && (
+            {ordersLoading ? (
+              <p className="py-8 text-center text-muted-foreground">Loading orders…</p>
+            ) : (
               <>
-                <h2 className="mt-10 font-serif text-xl font-bold">Completed ({completedOrders.length})</h2>
-                <div className="mt-4 space-y-3">
-                  {completedOrders.map((order) => (
-                    <Card key={order.id} className="opacity-70">
-                      <CardContent className="flex items-center justify-between p-4">
-                        <div>
-                          <span className="font-semibold">{order.id}</span>
-                          <span className="ml-3 text-sm text-muted-foreground">{order.customerName} · {formatPrice(order.total)}</span>
-                        </div>
-                        <Badge className={statusColors.delivered}>{statusLabels.delivered}</Badge>
+                <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  {['pending', 'processing', 'out-for-delivery', 'delivered'].map((status) => (
+                    <Card key={status}>
+                      <CardContent className="p-4 text-center">
+                        <div className="text-2xl font-bold">{orders.filter((o) => o.status === status).length}</div>
+                        <div className="text-xs text-muted-foreground">{statusLabels[status]}</div>
                       </CardContent>
                     </Card>
                   ))}
                 </div>
+
+                <h2 className="mt-8 font-serif text-xl font-bold">Active Orders ({activeOrders.length})</h2>
+                <div className="mt-4 space-y-4">
+                  {activeOrders.length === 0 && <p className="py-8 text-center text-muted-foreground">No active orders 🎉</p>}
+                  {activeOrders.map((order, i) => (
+                    <motion.div key={order.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
+                      <Card>
+                        <CardContent className="p-5">
+                          <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3">
+                                <Package className="h-5 w-5 text-muted-foreground" />
+                                <span className="font-semibold">{order.order_number}</span>
+                                <Badge className={statusColors[order.status]}>{statusLabels[order.status]}</Badge>
+                              </div>
+                              <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+                                <p>👤 {order.customer_name} · 📞 {order.customer_phone}</p>
+                                <p>📧 {order.customer_email}</p>
+                                <p>📍 {order.customer_address}</p>
+                                <p>🕐 {new Date(order.created_at).toLocaleString()}</p>
+                              </div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {(order.items || []).map((item: any, idx: number) => (
+                                  <span key={idx} className="rounded-full bg-secondary px-3 py-1 text-xs">{item.name} × {item.quantity}</span>
+                                ))}
+                              </div>
+                              <p className="mt-2 text-lg font-bold text-primary">{formatPrice(order.total)}</p>
+                            </div>
+                            {nextStatus[order.status] && (
+                              <Button onClick={() => handleAdvance(order)} className="gap-1 shrink-0">
+                                {nextActionLabel[order.status]}
+                                <ChevronRight className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  ))}
+                </div>
+
+                {completedOrders.length > 0 && (
+                  <>
+                    <h2 className="mt-10 font-serif text-xl font-bold">Completed ({completedOrders.length})</h2>
+                    <div className="mt-4 space-y-3">
+                      {completedOrders.map((order) => (
+                        <Card key={order.id} className="opacity-70">
+                          <CardContent className="flex items-center justify-between p-4">
+                            <div>
+                              <span className="font-semibold">{order.order_number}</span>
+                              <span className="ml-3 text-sm text-muted-foreground">{order.customer_name} · {formatPrice(order.total)}</span>
+                            </div>
+                            <Badge className={statusColors.delivered}>{statusLabels.delivered}</Badge>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </>
+                )}
               </>
             )}
           </TabsContent>
@@ -351,37 +455,20 @@ const AdminPage = () => {
                     </div>
                     <div>
                       <Label>Images</Label>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        onChange={handleFileSelect}
-                        className="hidden"
-                      />
-                      
-                      {/* Image previews grid */}
+                      <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleFileSelect} className="hidden" />
                       {imagePreviews.length > 0 && (
                         <div className="grid grid-cols-3 gap-2 mb-2">
                           {imagePreviews.map((src, idx) => (
                             <div key={idx} className="relative group">
                               <img src={src} alt={`Preview ${idx + 1}`} className="h-24 w-full rounded-lg object-cover" />
-                              <button
-                                type="button"
-                                onClick={() => removeImage(idx)}
-                                className="absolute top-1 right-1 rounded-full bg-destructive p-1 text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                              >
+                              <button type="button" onClick={() => removeImage(idx)} className="absolute top-1 right-1 rounded-full bg-destructive p-1 text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100">
                                 <X className="h-3 w-3" />
                               </button>
                             </div>
                           ))}
                         </div>
                       )}
-
-                      <div
-                        onClick={() => fileInputRef.current?.click()}
-                        className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/30 p-4 transition-colors hover:border-primary hover:bg-muted/50"
-                      >
+                      <div onClick={() => fileInputRef.current?.click()} className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/30 p-4 transition-colors hover:border-primary hover:bg-muted/50">
                         <div className="flex flex-col items-center gap-1 text-muted-foreground">
                           <Upload className="h-8 w-8" />
                           <span className="text-sm">{imagePreviews.length > 0 ? 'Add more images' : 'Click to upload images'}</span>
@@ -437,30 +524,90 @@ const AdminPage = () => {
             )}
           </TabsContent>
 
+          {/* USERS TAB */}
+          <TabsContent value="users">
+            <div className="mt-4">
+              <div className="flex items-center justify-between">
+                <h2 className="font-serif text-xl font-bold">Registered Users</h2>
+                <Button variant="outline" size="sm" onClick={fetchUsers} disabled={usersLoading}>
+                  {usersLoading ? 'Loading…' : 'Refresh'}
+                </Button>
+              </div>
+              {usersLoading ? (
+                <p className="py-8 text-center text-muted-foreground">Loading users…</p>
+              ) : appUsers.length === 0 ? (
+                <p className="py-8 text-center text-muted-foreground">No registered users yet</p>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {appUsers.map((u) => {
+                    const isBanned = u.banned_until && new Date(u.banned_until) > new Date();
+                    return (
+                      <Card key={u.id}>
+                        <CardContent className="flex items-center justify-between p-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold">{u.user_metadata?.full_name || 'No name'}</span>
+                              {isBanned && <Badge variant="destructive">Disabled</Badge>}
+                              {!isBanned && new Date(u.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) && (
+                                <Badge className="bg-accent text-accent-foreground">New</Badge>
+                              )}
+                            </div>
+                            <p className="text-sm text-muted-foreground">{u.email || u.phone}</p>
+                            <p className="text-xs text-muted-foreground">Joined {new Date(u.created_at).toLocaleDateString()}</p>
+                          </div>
+                          <Button
+                            variant={isBanned ? 'default' : 'destructive'}
+                            size="sm"
+                            className="gap-1"
+                            onClick={() => toggleUserDisabled(u.id, !isBanned)}
+                          >
+                            {isBanned ? <><UserCheck className="h-4 w-4" /> Enable</> : <><UserX className="h-4 w-4" /> Disable</>}
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
           {/* SETTINGS TAB */}
           <TabsContent value="settings">
             <div className="mt-4 max-w-lg space-y-6">
               <Card>
                 <CardContent className="p-6 space-y-4">
+                  <h3 className="font-serif text-lg font-semibold">Restaurant Settings</h3>
+                  <div>
+                    <Label htmlFor="restaurant-name">Restaurant Name</Label>
+                    <Input id="restaurant-name" value={restaurantName} onChange={(e) => setRestaurantName(e.target.value)} placeholder="Bellefood" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label htmlFor="whatsapp-number">WhatsApp Number</Label>
+                    <Input id="whatsapp-number" value={whatsappNumber} onChange={(e) => setWhatsappNumber(e.target.value)} placeholder="2347089989283" className="mt-1" />
+                    <p className="mt-1 text-xs text-muted-foreground">Include country code without + (e.g. 2347089989283)</p>
+                  </div>
+                  <div>
+                    <Label htmlFor="delivery-fee">Delivery Fee (₦)</Label>
+                    <Input id="delivery-fee" type="number" value={deliveryFee} onChange={(e) => setDeliveryFee(e.target.value)} placeholder="500" className="mt-1" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-6 space-y-4">
                   <h3 className="font-serif text-lg font-semibold">Payment Settings</h3>
                   <div>
                     <Label htmlFor="paystack-key">Paystack Public Key</Label>
-                    <Input
-                      id="paystack-key"
-                      value={paystackKey}
-                      onChange={(e) => setPaystackKey(e.target.value)}
-                      placeholder="pk_test_..."
-                      className="mt-1 font-mono text-sm"
-                    />
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Find this in your Paystack dashboard under Settings → API Keys & Webhooks.
-                    </p>
+                    <Input id="paystack-key" value={paystackKey} onChange={(e) => setPaystackKey(e.target.value)} placeholder="pk_test_..." className="mt-1 font-mono text-sm" />
+                    <p className="mt-1 text-xs text-muted-foreground">Find this in your Paystack dashboard under Settings → API Keys & Webhooks.</p>
                   </div>
-                  <Button onClick={handleSaveSettings} disabled={upsertSetting.isPending}>
-                    {upsertSetting.isPending ? 'Saving…' : 'Save Settings'}
-                  </Button>
                 </CardContent>
               </Card>
+
+              <Button onClick={handleSaveSettings} disabled={upsertSetting.isPending} className="w-full">
+                {upsertSetting.isPending ? 'Saving…' : 'Save All Settings'}
+              </Button>
             </div>
           </TabsContent>
         </Tabs>

@@ -47,6 +47,90 @@ export type Database = {
         }
         Relationships: []
       }
+      orders: {
+        Row: {
+          created_at: string
+          customer_address: string
+          customer_email: string
+          customer_name: string
+          customer_phone: string
+          fulfillment: string
+          id: string
+          items: Json
+          order_number: string
+          payment_reference: string
+          status: string
+          total: number
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          customer_address?: string
+          customer_email?: string
+          customer_name?: string
+          customer_phone?: string
+          fulfillment?: string
+          id?: string
+          items?: Json
+          order_number: string
+          payment_reference?: string
+          status?: string
+          total?: number
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          customer_address?: string
+          customer_email?: string
+          customer_name?: string
+          customer_phone?: string
+          fulfillment?: string
+          id?: string
+          items?: Json
+          order_number?: string
+          payment_reference?: string
+          status?: string
+          total?: number
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          email: string
+          full_name: string
+          id: string
+          is_disabled: boolean
+          notifications_enabled: boolean
+          phone: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string
+          full_name?: string
+          id: string
+          is_disabled?: boolean
+          notifications_enabled?: boolean
+          phone?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          full_name?: string
+          id?: string
+          is_disabled?: boolean
+          notifications_enabled?: boolean
+          phone?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       settings: {
         Row: {
           id: string

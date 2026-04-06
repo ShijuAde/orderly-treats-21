@@ -57,11 +57,17 @@ const CartPage = () => {
       return;
     }
 
+    if (!paystackKey) {
+      toast({ title: 'Payment not configured', description: 'Please contact the admin.', variant: 'destructive' });
+      return;
+    }
+
     setPaying(true);
 
     payWithPaystack({
       email: customerEmail,
       amount: total * 100, // kobo
+      publicKey: paystackKey,
       onSuccess: (reference) => {
         const orderId = generateOrderId();
 

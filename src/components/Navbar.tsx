@@ -1,22 +1,22 @@
 import { Link, useLocation } from 'react-router-dom';
-import { ShoppingCart, Menu, X, User, ClipboardList } from 'lucide-react';
+import { ShoppingCart, Menu, X, User } from 'lucide-react';
 import { useCartStore } from '@/store/cartStore';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/hooks/useAuth';
 
 const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const itemCount = useCartStore((s) => s.getItemCount());
   const location = useLocation();
+  const { user } = useAuth();
 
   const links = [
     { to: '/', label: 'Home' },
     { to: '/menu', label: 'Menu' },
-    { to: '/orders', label: 'My Orders' },
     { to: '/reviews', label: 'Reviews' },
   ];
-
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -32,11 +32,7 @@ const Navbar = () => {
         <div className="hidden items-center gap-1 md:flex">
           {links.map((link) => (
             <Link key={link.to} to={link.to}>
-              <Button
-                variant={isActive(link.to) ? 'secondary' : 'ghost'}
-                size="sm"
-                className="font-sans text-sm"
-              >
+              <Button variant={isActive(link.to) ? 'secondary' : 'ghost'} size="sm" className="font-sans text-sm">
                 {link.label}
               </Button>
             </Link>
@@ -59,12 +55,13 @@ const Navbar = () => {
             </Button>
           </Link>
 
-          <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden"
-            onClick={() => setMobileOpen(!mobileOpen)}
-          >
+          <Link to={user ? '/account' : '/auth'}>
+            <Button variant={isActive('/account') || isActive('/auth') ? 'secondary' : 'ghost'} size="icon">
+              <User className="h-5 w-5" />
+            </Button>
+          </Link>
+
+          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)}>
             {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
         </div>
@@ -82,14 +79,16 @@ const Navbar = () => {
             <div className="flex flex-col gap-1 p-4">
               {links.map((link) => (
                 <Link key={link.to} to={link.to} onClick={() => setMobileOpen(false)}>
-                  <Button
-                    variant={isActive(link.to) ? 'secondary' : 'ghost'}
-                    className="w-full justify-start font-sans"
-                  >
+                  <Button variant={isActive(link.to) ? 'secondary' : 'ghost'} className="w-full justify-start font-sans">
                     {link.label}
                   </Button>
                 </Link>
               ))}
+              <Link to={user ? '/account' : '/auth'} onClick={() => setMobileOpen(false)}>
+                <Button variant="ghost" className="w-full justify-start font-sans gap-2">
+                  <User className="h-4 w-4" /> {user ? 'My Account' : 'Login / Sign Up'}
+                </Button>
+              </Link>
             </div>
           </motion.div>
         )}

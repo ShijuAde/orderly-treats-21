@@ -11,6 +11,7 @@ import { useCartStore } from '@/store/cartStore';
 import { formatPrice, generateOrderId } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { payWithPaystack } from '@/lib/paystack';
+import { useSetting } from '@/hooks/useSettings';
 
 const RESTAURANT_WHATSAPP = '2347089989283';
 

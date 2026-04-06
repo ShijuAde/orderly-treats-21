@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Package, ChevronRight, Shield, Plus, Pencil, Trash2, LogOut, UtensilsCrossed, Upload, ImageIcon } from 'lucide-react';
+import { Package, ChevronRight, Shield, Plus, Pencil, Trash2, LogOut, Upload, Settings, X } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import { notifyOrderStatus } from '@/lib/whatsapp';
 import { useAuth } from '@/hooks/useAuth';
 import { useMenuItems } from '@/hooks/useMenuItems';
+import { useSettings, useUpsertSetting } from '@/hooks/useSettings';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -52,9 +53,10 @@ interface MenuFormData {
   price: string;
   image: string;
   category: string;
+  images: string[];
 }
 
-const emptyForm: MenuFormData = { name: '', description: '', price: '', image: '', category: 'Main Dishes' };
+const emptyForm: MenuFormData = { name: '', description: '', price: '', image: '', category: 'Main Dishes', images: [] };
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
@@ -63,16 +65,28 @@ const AdminPage = () => {
   const { orders, updateOrderStatus } = useCartStore();
   const { toast } = useToast();
   const { data: menuItems = [], isLoading: menuLoading } = useMenuItems();
+  const { data: settings = {} } = useSettings();
+  const upsertSetting = useUpsertSetting();
   const queryClient = useQueryClient();
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<MenuFormData>(emptyForm);
   const [saving, setSaving] = useState(false);
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Settings state
+  const [paystackKey, setPaystackKey] = useState('');
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  // Sync settings to local state once
+  if (!settingsLoaded && settings.paystack_public_key !== undefined) {
+    setPaystackKey(settings.paystack_public_key || '');
+    setSettingsLoaded(true);
+  }
 
   if (authLoading) return <div className="flex min-h-[60vh] items-center justify-center text-muted-foreground">Loading…</div>;
   if (!user) return <Navigate to="/admin/login" replace />;
@@ -88,32 +102,52 @@ const AdminPage = () => {
   const openCreate = () => {
     setEditingId(null);
     setForm(emptyForm);
-    setImageFile(null);
-    setImagePreview(null);
+    setImageFiles([]);
+    setImagePreviews([]);
     setFormOpen(true);
   };
 
   const openEdit = (item: any) => {
     setEditingId(item.id);
-    setForm({ name: item.name, description: item.description, price: String(item.price), image: item.image, category: item.category });
-    setImageFile(null);
-    setImagePreview(item.image || null);
+    const allImages: string[] = item.images?.length ? item.images : (item.image ? [item.image] : []);
+    setForm({ name: item.name, description: item.description, price: String(item.price), image: item.image, category: item.category, images: allImages });
+    setImageFiles([]);
+    setImagePreviews(allImages);
     setFormOpen(true);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      toast({ title: 'Invalid file', description: 'Please select an image file', variant: 'destructive' });
-      return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) {
+        toast({ title: 'Invalid file', description: 'Please select image files only', variant: 'destructive' });
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        toast({ title: 'File too large', description: 'Maximum size is 5MB per image', variant: 'destructive' });
+        return;
+      }
     }
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ title: 'File too large', description: 'Maximum size is 5MB', variant: 'destructive' });
-      return;
+
+    setImageFiles((prev) => [...prev, ...files]);
+    const newPreviews = files.map((f) => URL.createObjectURL(f));
+    setImagePreviews((prev) => [...prev, ...newPreviews]);
+    
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removeImage = (index: number) => {
+    setImagePreviews((prev) => prev.filter((_, i) => i !== index));
+    // If it was a new file (index >= existing images count)
+    const existingCount = form.images.length;
+    if (index >= existingCount) {
+      setImageFiles((prev) => prev.filter((_, i) => i !== (index - existingCount)));
+    } else {
+      setForm((prev) => ({ ...prev, images: prev.images.filter((_, i) => i !== index) }));
     }
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
   };
 
   const uploadImage = async (file: File): Promise<string> => {
@@ -128,11 +162,13 @@ const AdminPage = () => {
     if (!form.name || !form.price) return;
     setSaving(true);
 
-    let imageUrl = form.image;
-    if (imageFile) {
+    let allImageUrls = [...form.images];
+
+    if (imageFiles.length > 0) {
       try {
         setUploading(true);
-        imageUrl = await uploadImage(imageFile);
+        const uploaded = await Promise.all(imageFiles.map(uploadImage));
+        allImageUrls = [...allImageUrls, ...uploaded];
         setUploading(false);
       } catch (err: any) {
         setUploading(false);
@@ -146,7 +182,8 @@ const AdminPage = () => {
       name: form.name,
       description: form.description,
       price: parseInt(form.price) || 0,
-      image: imageUrl,
+      image: allImageUrls[0] || '',
+      images: allImageUrls,
       category: form.category,
     };
 
@@ -177,9 +214,17 @@ const AdminPage = () => {
     }
   };
 
+  const handleSaveSettings = async () => {
+    try {
+      await upsertSetting.mutateAsync({ key: 'paystack_public_key', value: paystackKey });
+      toast({ title: 'Settings saved!' });
+    } catch (err: any) {
+      toast({ title: 'Error saving settings', description: err.message, variant: 'destructive' });
+    }
+  };
+
   const activeOrders = orders.filter((o) => o.status !== 'delivered');
   const completedOrders = orders.filter((o) => o.status === 'delivered');
-  const categories = [...new Set(menuItems.map((i) => i.category))];
 
   return (
     <div className="min-h-screen py-8">
@@ -198,6 +243,7 @@ const AdminPage = () => {
           <TabsList>
             <TabsTrigger value="orders">Orders</TabsTrigger>
             <TabsTrigger value="menu">Menu Items</TabsTrigger>
+            <TabsTrigger value="settings" className="gap-1"><Settings className="h-4 w-4" /> Settings</TabsTrigger>
           </TabsList>
 
           {/* ORDERS TAB */}
@@ -280,7 +326,7 @@ const AdminPage = () => {
                 <DialogTrigger asChild>
                   <Button onClick={openCreate} className="gap-1"><Plus className="h-4 w-4" /> Add Item</Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent className="max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle>{editingId ? 'Edit Item' : 'Add New Item'}</DialogTitle>
                   </DialogHeader>
@@ -304,41 +350,47 @@ const AdminPage = () => {
                       </div>
                     </div>
                     <div>
-                      <Label>Image</Label>
+                      <Label>Images</Label>
                       <input
                         ref={fileInputRef}
                         type="file"
                         accept="image/*"
+                        multiple
                         onChange={handleFileSelect}
                         className="hidden"
                       />
+                      
+                      {/* Image previews grid */}
+                      {imagePreviews.length > 0 && (
+                        <div className="grid grid-cols-3 gap-2 mb-2">
+                          {imagePreviews.map((src, idx) => (
+                            <div key={idx} className="relative group">
+                              <img src={src} alt={`Preview ${idx + 1}`} className="h-24 w-full rounded-lg object-cover" />
+                              <button
+                                type="button"
+                                onClick={() => removeImage(idx)}
+                                className="absolute top-1 right-1 rounded-full bg-destructive p-1 text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       <div
                         onClick={() => fileInputRef.current?.click()}
                         className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/30 p-4 transition-colors hover:border-primary hover:bg-muted/50"
                       >
-                        {imagePreview ? (
-                          <img src={imagePreview} alt="Preview" className="h-32 w-full rounded-lg object-cover" />
-                        ) : (
-                          <div className="flex flex-col items-center gap-1 text-muted-foreground">
-                            <Upload className="h-8 w-8" />
-                            <span className="text-sm">Click to upload image</span>
-                            <span className="text-xs">JPG, PNG, WebP · Max 5MB</span>
-                          </div>
-                        )}
+                        <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                          <Upload className="h-8 w-8" />
+                          <span className="text-sm">{imagePreviews.length > 0 ? 'Add more images' : 'Click to upload images'}</span>
+                          <span className="text-xs">JPG, PNG, WebP · Max 5MB each</span>
+                        </div>
                       </div>
-                      {imagePreview && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="mt-1 text-xs text-muted-foreground"
-                          onClick={() => fileInputRef.current?.click()}
-                        >
-                          Change image
-                        </Button>
-                      )}
                     </div>
                     <Button onClick={handleSave} disabled={saving || uploading} className="w-full">
-                      {uploading ? 'Uploading image…' : saving ? 'Saving…' : editingId ? 'Update Item' : 'Create Item'}
+                      {uploading ? 'Uploading images…' : saving ? 'Saving…' : editingId ? 'Update Item' : 'Create Item'}
                     </Button>
                   </div>
                 </DialogContent>
@@ -352,7 +404,16 @@ const AdminPage = () => {
                 {menuItems.map((item) => (
                   <Card key={item.id}>
                     <CardContent className="flex items-center gap-4 p-4">
-                      <img src={item.image} alt={item.name} className="h-16 w-16 rounded-lg object-cover" />
+                      <div className="flex gap-1 shrink-0">
+                        {(item.images?.length ? item.images.slice(0, 2) : [item.image]).map((src, i) => (
+                          <img key={i} src={src} alt={item.name} className="h-16 w-16 rounded-lg object-cover" />
+                        ))}
+                        {(item.images?.length || 0) > 2 && (
+                          <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-muted text-xs text-muted-foreground">
+                            +{item.images!.length - 2}
+                          </div>
+                        )}
+                      </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-semibold truncate">{item.name}</span>
@@ -374,6 +435,33 @@ const AdminPage = () => {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          {/* SETTINGS TAB */}
+          <TabsContent value="settings">
+            <div className="mt-4 max-w-lg space-y-6">
+              <Card>
+                <CardContent className="p-6 space-y-4">
+                  <h3 className="font-serif text-lg font-semibold">Payment Settings</h3>
+                  <div>
+                    <Label htmlFor="paystack-key">Paystack Public Key</Label>
+                    <Input
+                      id="paystack-key"
+                      value={paystackKey}
+                      onChange={(e) => setPaystackKey(e.target.value)}
+                      placeholder="pk_test_..."
+                      className="mt-1 font-mono text-sm"
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Find this in your Paystack dashboard under Settings → API Keys & Webhooks.
+                    </p>
+                  </div>
+                  <Button onClick={handleSaveSettings} disabled={upsertSetting.isPending}>
+                    {upsertSetting.isPending ? 'Saving…' : 'Save Settings'}
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </div>

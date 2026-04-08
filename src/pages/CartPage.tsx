@@ -116,6 +116,60 @@ const CartPage = () => {
     });
   };
 
+  // Show order summary after successful payment
+  if (completedOrder) {
+    return (
+      <div className="min-h-screen py-8">
+        <div className="container mx-auto max-w-lg px-4">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}>
+            <Card>
+              <CardContent className="p-6 text-center space-y-6">
+                <CheckCircle className="mx-auto h-16 w-16 text-green-500" />
+                <div>
+                  <h2 className="font-serif text-2xl font-bold">Order Confirmed! 🎉</h2>
+                  <p className="text-muted-foreground mt-1">Order #{completedOrder.orderId}</p>
+                  <p className="text-xs text-muted-foreground">Ref: {completedOrder.reference}</p>
+                </div>
+
+                <div className="text-left space-y-2 bg-muted/50 rounded-lg p-4">
+                  <h3 className="font-semibold text-sm">Order Summary</h3>
+                  {completedOrder.items.map((item) => (
+                    <div key={item.id} className="flex justify-between text-sm">
+                      <span>{item.name} × {item.quantity}</span>
+                      <span>{formatPrice(item.price * item.quantity)}</span>
+                    </div>
+                  ))}
+                  <div className="border-t pt-2 mt-2 flex justify-between font-bold">
+                    <span>Total</span>
+                    <span className="text-primary">{formatPrice(completedOrder.total)}</span>
+                  </div>
+                </div>
+
+                {fulfillment === 'delivery' && (
+                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 text-left">
+                    <p className="text-sm font-medium text-primary">📍 Please confirm your delivery address on WhatsApp</p>
+                    <p className="text-xs text-muted-foreground mt-1">{customerAddress}</p>
+                  </div>
+                )}
+
+                <Button size="lg" className="w-full gap-2" onClick={() => window.open(completedOrder.whatsappUrl, '_blank')}>
+                  <MessageCircle className="h-5 w-5" />
+                  Confirm Order on WhatsApp
+                </Button>
+
+                <Link to="/menu">
+                  <Button variant="outline" className="w-full gap-2 mt-2">
+                    <ArrowLeft className="h-4 w-4" /> Continue Shopping
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
+
   if (items.length === 0) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-4">

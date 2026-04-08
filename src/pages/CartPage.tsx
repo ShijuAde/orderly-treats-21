@@ -116,6 +116,16 @@ const CartPage = () => {
     });
   };
 
+  // Auto-redirect to WhatsApp after checkout
+  useEffect(() => {
+    if (completedOrder) {
+      const timer = setTimeout(() => {
+        window.open(completedOrder.whatsappUrl, '_blank');
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [completedOrder]);
+
   // Show order summary after successful payment
   if (completedOrder) {
     return (
@@ -145,17 +155,14 @@ const CartPage = () => {
                   </div>
                 </div>
 
-                {fulfillment === 'delivery' && (
-                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 text-left">
-                    <p className="text-sm font-medium text-primary">📍 Please confirm your delivery address on WhatsApp</p>
-                    <p className="text-xs text-muted-foreground mt-1">{customerAddress}</p>
-                  </div>
-                )}
+                <p className="text-sm text-muted-foreground">Redirecting to WhatsApp…</p>
 
-                <Button size="lg" className="w-full gap-2" onClick={() => window.open(completedOrder.whatsappUrl, '_blank')}>
-                  <MessageCircle className="h-5 w-5" />
-                  Confirm Order on WhatsApp
-                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Didn't redirect?{' '}
+                  <a href={completedOrder.whatsappUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                    Click here
+                  </a>
+                </p>
 
                 <Link to="/menu">
                   <Button variant="outline" className="w-full gap-2 mt-2">

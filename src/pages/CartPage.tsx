@@ -89,14 +89,18 @@ const CartPage = () => {
           payment_reference: reference,
         } as any);
 
+        const orderItems = items.map(i => ({ id: i.id, name: i.name, quantity: i.quantity, price: i.price, image: i.image }));
         clearCart();
-        toast({ title: '🎉 Payment successful!', description: `Ref: ${reference}` });
+        setPaying(false);
 
+        toast({ title: '🎉 Payment successful!', description: `Order ${orderId} confirmed. Ref: ${reference}` });
+
+        // Build WhatsApp message and redirect
         const message = buildWhatsAppMessage(orderId);
         const whatsappUrl = `https://wa.me/${whatsapp}?text=${encodeURIComponent(message)}`;
-        window.open(whatsappUrl, '_blank');
 
-        setPaying(false);
+        // Show order summary then redirect to WhatsApp
+        setCompletedOrder({ orderId, reference, items: orderItems, total, whatsappUrl });
       },
       onClose: () => {
         setPaying(false);

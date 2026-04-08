@@ -197,6 +197,20 @@ const AdminPage = () => {
     } else {
       toast({ title: `Order ${order.order_number} updated`, description: `Status changed to ${statusLabels[next]}` });
       notifyOrderStatus(order.customer_phone, order.order_number, next as any);
+      // Send email notification
+      supabase.functions.invoke('send-order-email', {
+        body: {
+          order_number: order.order_number,
+          customer_name: order.customer_name,
+          customer_email: order.customer_email,
+          status: next,
+          items: order.items,
+          total: order.total,
+          restaurant_name: settings.restaurant_name || 'Bellefood',
+        },
+      }).then(({ error: emailErr }) => {
+        if (emailErr) console.error('Email notification failed:', emailErr);
+      });
     }
   };
 

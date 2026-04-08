@@ -29,6 +29,13 @@ const CartPage = () => {
   const [customerAddress, setCustomerAddress] = useState('');
   const [fulfillment, setFulfillment] = useState<'delivery' | 'pickup'>('delivery');
   const [paying, setPaying] = useState(false);
+  const [completedOrder, setCompletedOrder] = useState<{
+    orderId: string;
+    reference: string;
+    items: { id: string; name: string; quantity: number; price: number; image: string }[];
+    total: number;
+    whatsappUrl: string;
+  } | null>(null);
 
   const subtotal = getTotal();
   const deliveryFee = fulfillment === 'delivery' ? (parseInt(deliveryFeeStr) || 0) : 0;

@@ -14,8 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      brands: {
+        Row: {
+          created_at: string
+          id: string
+          logo_url: string
+          name: string
+          owner_id: string
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          logo_url?: string
+          name: string
+          owner_id: string
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          logo_url?: string
+          name?: string
+          owner_id?: string
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       menu_items: {
         Row: {
+          brand_id: string | null
           category: string
           created_at: string
           description: string
@@ -26,6 +57,7 @@ export type Database = {
           price: number
         }
         Insert: {
+          brand_id?: string | null
           category?: string
           created_at?: string
           description?: string
@@ -36,6 +68,7 @@ export type Database = {
           price?: number
         }
         Update: {
+          brand_id?: string | null
           category?: string
           created_at?: string
           description?: string
@@ -45,10 +78,19 @@ export type Database = {
           name?: string
           price?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "menu_items_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       orders: {
         Row: {
+          brand_id: string | null
           created_at: string
           customer_address: string
           customer_email: string
@@ -65,6 +107,7 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          brand_id?: string | null
           created_at?: string
           customer_address?: string
           customer_email?: string
@@ -81,6 +124,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          brand_id?: string | null
           created_at?: string
           customer_address?: string
           customer_email?: string
@@ -96,7 +140,15 @@ export type Database = {
           updated_at?: string
           user_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "orders_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
@@ -152,15 +204,42 @@ export type Database = {
         }
         Relationships: []
       }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "customer" | "restaurant_owner" | "super_admin"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -287,6 +366,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["customer", "restaurant_owner", "super_admin"],
+    },
   },
 } as const

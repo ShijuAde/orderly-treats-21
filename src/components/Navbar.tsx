@@ -13,8 +13,6 @@ const Navbar = () => {
   const { user } = useAuth();
 
   const links = [
-    { to: '/', label: 'Home' },
-    { to: '/menu', label: 'Menu' },
     { to: '/reviews', label: 'Reviews' },
   ];
 
@@ -23,7 +21,7 @@ const Navbar = () => {
   return (
     <nav className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur-md">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
-        <Link to="/" className="flex items-center gap-2">
+        <Link to={user ? '/account' : '/auth'} className="flex items-center gap-2">
           <span className="text-2xl">🍽️</span>
           <span className="font-serif text-xl font-bold text-primary">Bellefood</span>
         </Link>

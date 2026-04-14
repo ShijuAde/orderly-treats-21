@@ -1,15 +1,28 @@
 import { useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import MenuCard from '@/components/MenuCard';
-import { useMenuItems } from '@/hooks/useMenuItems';
+import { useBrandBySlug } from '@/hooks/useBrand';
+import { useMenuItemsByBrand } from '@/hooks/useMenuItems';
+import RestaurantNotFound from './RestaurantNotFound';
 
-const MenuPage = () => {
+const BrandMenuPage = () => {
+  const { slug } = useParams<{ slug: string }>();
+  const { data: brand, isLoading: brandLoading } = useBrandBySlug(slug);
+  const { data: menuItems = [], isLoading: menuLoading } = useMenuItemsByBrand(brand?.id);
   const [activeCategory, setActiveCategory] = useState('All');
   const [search, setSearch] = useState('');
-  const { data: menuItems = [], isLoading } = useMenuItems();
+
+  if (brandLoading) {
+    return <div className="flex min-h-[60vh] items-center justify-center text-muted-foreground">Loading…</div>;
+  }
+
+  if (!brand) {
+    return <RestaurantNotFound />;
+  }
 
   const categories = [...new Set(menuItems.map((item) => item.category))];
 
@@ -24,9 +37,14 @@ const MenuPage = () => {
   return (
     <div className="min-h-screen py-8">
       <div className="container mx-auto px-4">
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-          <h1 className="font-serif text-3xl font-bold">Our Menu</h1>
-          <p className="mt-1 text-muted-foreground">Choose from our delicious selection</p>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-4">
+          {brand.logo_url && (
+            <img src={brand.logo_url} alt={brand.name} className="h-14 w-14 rounded-full object-cover" />
+          )}
+          <div>
+            <h1 className="font-serif text-3xl font-bold">{brand.name}</h1>
+            <p className="mt-1 text-muted-foreground">Browse the menu</p>
+          </div>
         </motion.div>
 
         <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -42,7 +60,7 @@ const MenuPage = () => {
           </div>
         </div>
 
-        {isLoading ? (
+        {menuLoading ? (
           <div className="py-20 text-center text-muted-foreground">Loading menu…</div>
         ) : (
           <>
@@ -52,7 +70,7 @@ const MenuPage = () => {
               ))}
             </div>
             {filtered.length === 0 && (
-              <div className="py-20 text-center text-muted-foreground">No dishes found. Try a different search or category.</div>
+              <div className="py-20 text-center text-muted-foreground">No dishes found.</div>
             )}
           </>
         )}
@@ -61,4 +79,4 @@ const MenuPage = () => {
   );
 };
 
-export default MenuPage;
+export default BrandMenuPage;

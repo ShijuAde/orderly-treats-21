@@ -9,6 +9,12 @@ export interface Brand {
   slug: string;
   logo_url: string;
   created_at: string;
+  description?: string;
+  hero_image_url?: string;
+  about_text?: string;
+  gallery_images?: string[];
+  theme?: string;
+  fulfillment_options?: { delivery?: boolean; pickup?: boolean; reservation?: boolean };
 }
 
 export function useBrandBySlug(slug: string | undefined) {

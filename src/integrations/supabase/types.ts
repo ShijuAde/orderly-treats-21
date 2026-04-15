@@ -16,30 +16,48 @@ export type Database = {
     Tables: {
       brands: {
         Row: {
+          about_text: string
           created_at: string
+          description: string
+          fulfillment_options: Json
+          gallery_images: string[]
+          hero_image_url: string
           id: string
           logo_url: string
           name: string
           owner_id: string
           slug: string
+          theme: string
           updated_at: string
         }
         Insert: {
+          about_text?: string
           created_at?: string
+          description?: string
+          fulfillment_options?: Json
+          gallery_images?: string[]
+          hero_image_url?: string
           id?: string
           logo_url?: string
           name: string
           owner_id: string
           slug: string
+          theme?: string
           updated_at?: string
         }
         Update: {
+          about_text?: string
           created_at?: string
+          description?: string
+          fulfillment_options?: Json
+          gallery_images?: string[]
+          hero_image_url?: string
           id?: string
           logo_url?: string
           name?: string
           owner_id?: string
           slug?: string
+          theme?: string
           updated_at?: string
         }
         Relationships: []
@@ -180,6 +198,54 @@ export type Database = {
           notifications_enabled?: boolean
           phone?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      reservations: {
+        Row: {
+          brand_id: string
+          created_at: string
+          customer_email: string
+          customer_name: string
+          customer_phone: string
+          id: string
+          notes: string
+          party_size: number
+          reservation_date: string
+          reservation_time: string
+          status: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          brand_id: string
+          created_at?: string
+          customer_email?: string
+          customer_name?: string
+          customer_phone?: string
+          id?: string
+          notes?: string
+          party_size?: number
+          reservation_date: string
+          reservation_time: string
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          brand_id?: string
+          created_at?: string
+          customer_email?: string
+          customer_name?: string
+          customer_phone?: string
+          id?: string
+          notes?: string
+          party_size?: number
+          reservation_date?: string
+          reservation_time?: string
+          status?: string
+          updated_at?: string
+          user_id?: string | null
         }
         Relationships: []
       }

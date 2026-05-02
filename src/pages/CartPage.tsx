@@ -82,13 +82,9 @@ const CartPage = () => {
         const orderId = generateOrderId();
 
         // Save order to database
-        // Determine brand_id from cart items
-        const brandId = items[0]?.brand_id || null;
-
         await supabase.from('orders').insert({
           order_number: orderId,
           user_id: user?.id || null,
-          brand_id: brandId,
           items: items.map(i => ({ id: i.id, name: i.name, quantity: i.quantity, price: i.price, image: i.image })),
           total,
           status: 'pending',
@@ -168,7 +164,7 @@ const CartPage = () => {
                   </a>
                 </p>
 
-                <Link to="/">
+                <Link to="/menu">
                   <Button variant="outline" className="w-full gap-2 mt-2">
                     <ArrowLeft className="h-4 w-4" /> Continue Shopping
                   </Button>
@@ -187,9 +183,9 @@ const CartPage = () => {
         <ShoppingBag className="h-16 w-16 text-muted-foreground/40" />
         <h2 className="font-serif text-2xl font-bold">Your cart is empty</h2>
         <p className="text-muted-foreground">Add some delicious dishes to get started!</p>
-        <Link to="/">
+        <Link to="/menu">
           <Button className="gap-2">
-            <ArrowLeft className="h-4 w-4" /> Browse Restaurants
+            <ArrowLeft className="h-4 w-4" /> Browse Menu
           </Button>
         </Link>
       </div>

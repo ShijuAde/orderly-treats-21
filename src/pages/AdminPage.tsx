@@ -1,26 +1,22 @@
 import { useState, useRef, useEffect } from 'react';
 import { Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Package, ChevronRight, Shield, Plus, Pencil, Trash2, LogOut, Upload, Settings, X, Users, CalendarDays, Store, Palette, Eye } from 'lucide-react';
+import { Package, ChevronRight, Shield, Plus, Pencil, Trash2, LogOut, Upload, Settings, X, Users, UserX, UserCheck } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatPrice } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { notifyOrderStatus } from '@/lib/whatsapp';
 import { useAuth } from '@/hooks/useAuth';
-import { useUserRole } from '@/hooks/useUserRole';
-import { useMyBrand } from '@/hooks/useBrand';
-import { useMenuItemsByBrand } from '@/hooks/useMenuItems';
+import { useMenuItems } from '@/hooks/useMenuItems';
 import { useSettings, useUpsertSetting } from '@/hooks/useSettings';
 import { supabase } from '@/integrations/supabase/client';
-import { useQueryClient, useQuery } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface DbOrder {
@@ -36,7 +32,6 @@ interface DbOrder {
   fulfillment: string;
   payment_reference: string;
   created_at: string;
-  brand_id: string | null;
 }
 
 const nextStatus: Record<string, string | null> = {
@@ -79,12 +74,19 @@ const emptyForm: MenuFormData = { name: '', description: '', price: '', image: '
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
+interface AppUser {
+  id: string;
+  email?: string;
+  phone?: string;
+  created_at: string;
+  user_metadata?: { full_name?: string };
+  banned_until?: string;
+}
+
 const AdminPage = () => {
   const { user, session, loading: authLoading, signOut } = useAuth();
-  const { data: role, isLoading: roleLoading } = useUserRole();
-  const { data: brand, isLoading: brandLoading } = useMyBrand();
   const { toast } = useToast();
-  const { data: menuItems = [], isLoading: menuLoading } = useMenuItemsByBrand(brand?.id);
+  const { data: menuItems = [], isLoading: menuLoading } = useMenuItems();
   const { data: settings = {} } = useSettings();
   const upsertSetting = useUpsertSetting();
   const queryClient = useQueryClient();
@@ -102,97 +104,89 @@ const AdminPage = () => {
   const [paystackKey, setPaystackKey] = useState('');
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [deliveryFee, setDeliveryFee] = useState('');
+  const [restaurantName, setRestaurantName] = useState('');
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 
-  // Brand website settings
-  const [brandDescription, setBrandDescription] = useState('');
-  const [brandAbout, setBrandAbout] = useState('');
-  const [brandTheme, setBrandTheme] = useState('classic');
-  const [brandHeroImage, setBrandHeroImage] = useState('');
-  const [fulfillmentDelivery, setFulfillmentDelivery] = useState(true);
-  const [fulfillmentPickup, setFulfillmentPickup] = useState(false);
-  const [fulfillmentReservation, setFulfillmentReservation] = useState(false);
-  const [brandSettingsLoaded, setBrandSettingsLoaded] = useState(false);
-
-  // Orders from DB (filtered by brand)
+  // Orders from DB
   const [orders, setOrders] = useState<DbOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
 
-  // Customer count
-  const { data: customerCount = 0 } = useQuery({
-    queryKey: ['brand-customers', brand?.id],
-    enabled: !!brand?.id,
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('orders')
-        .select('customer_email')
-        .eq('brand_id', brand!.id);
-      const unique = new Set((data || []).map((o: any) => o.customer_email));
-      return unique.size;
-    },
-  });
+  // Users
+  const [appUsers, setAppUsers] = useState<AppUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
 
-  // Reservations
-  const { data: reservations = [] } = useQuery({
-    queryKey: ['brand-reservations', brand?.id],
-    enabled: !!brand?.id,
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('reservations')
-        .select('*')
-        .eq('brand_id', brand!.id)
-        .order('reservation_date', { ascending: true });
-      return data || [];
-    },
-  });
-
-  // Sync settings
+  // Sync settings to local state once
   if (!settingsLoaded && settings.paystack_public_key !== undefined) {
     setPaystackKey(settings.paystack_public_key || '');
     setWhatsappNumber(settings.whatsapp_number || '');
     setDeliveryFee(settings.delivery_fee || '');
+    setRestaurantName(settings.restaurant_name || '');
     setSettingsLoaded(true);
   }
 
-  // Sync brand settings
+  // Fetch orders from DB
   useEffect(() => {
-    if (brand && !brandSettingsLoaded) {
-      setBrandDescription((brand as any).description || '');
-      setBrandAbout((brand as any).about_text || '');
-      setBrandTheme((brand as any).theme || 'classic');
-      setBrandHeroImage((brand as any).hero_image_url || '');
-      const fo = (brand as any).fulfillment_options || {};
-      setFulfillmentDelivery(fo.delivery !== false);
-      setFulfillmentPickup(fo.pickup === true);
-      setFulfillmentReservation(fo.reservation === true);
-      setBrandSettingsLoaded(true);
-    }
-  }, [brand, brandSettingsLoaded]);
-
-  // Fetch orders filtered by brand
-  useEffect(() => {
-    if (!brand?.id) return;
     const fetchOrders = async () => {
-      const { data } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('brand_id', brand.id)
-        .order('created_at', { ascending: false });
+      const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
       setOrders((data as any) || []);
       setOrdersLoading(false);
     };
     fetchOrders();
+
     const channel = supabase
       .channel('admin-orders')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => { fetchOrders(); })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [brand?.id]);
 
-  if (authLoading || roleLoading || brandLoading) return <div className="flex min-h-[60vh] items-center justify-center text-muted-foreground">Loading…</div>;
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  // Fetch users
+  const fetchUsers = async () => {
+    if (!session) return;
+    setUsersLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-users', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: null,
+        method: 'GET',
+      });
+      // Use query params via custom fetch
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-users?action=list`, {
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+      });
+      const json = await res.json();
+      if (json.users) {
+        setAppUsers(json.users.filter((u: any) => u.email !== 'shijuadeoyenuga@gmail.com'));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    setUsersLoading(false);
+  };
+
+  const toggleUserDisabled = async (userId: string, disable: boolean) => {
+    if (!session) return;
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-users?action=disable`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, disabled: disable }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({ title: disable ? 'User disabled' : 'User enabled' });
+        fetchUsers();
+      } else {
+        toast({ title: 'Error', description: json.error, variant: 'destructive' });
+      }
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  if (authLoading) return <div className="flex min-h-[60vh] items-center justify-center text-muted-foreground">Loading…</div>;
   if (!user) return <Navigate to="/admin/login" replace />;
-  if (role !== 'restaurant_owner' && role !== 'super_admin') return <Navigate to="/auth" replace />;
-  if (!brand) return <Navigate to="/create-brand" replace />;
 
   const handleAdvance = async (order: DbOrder) => {
     const next = nextStatus[order.status];
@@ -201,8 +195,9 @@ const AdminPage = () => {
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
-      toast({ title: `Order ${order.order_number} updated`, description: `Status → ${statusLabels[next]}` });
+      toast({ title: `Order ${order.order_number} updated`, description: `Status changed to ${statusLabels[next]}` });
       notifyOrderStatus(order.customer_phone, order.order_number, next as any);
+      // Send email notification
       supabase.functions.invoke('send-order-email', {
         body: {
           order_number: order.order_number,
@@ -211,13 +206,21 @@ const AdminPage = () => {
           status: next,
           items: order.items,
           total: order.total,
-          restaurant_name: brand.name,
+          restaurant_name: settings.restaurant_name || 'Bellefood',
         },
+      }).then(({ error: emailErr }) => {
+        if (emailErr) console.error('Email notification failed:', emailErr);
       });
     }
   };
 
-  const openCreate = () => { setEditingId(null); setForm(emptyForm); setImageFiles([]); setImagePreviews([]); setFormOpen(true); };
+  const openCreate = () => {
+    setEditingId(null);
+    setForm(emptyForm);
+    setImageFiles([]);
+    setImagePreviews([]);
+    setFormOpen(true);
+  };
 
   const openEdit = (item: any) => {
     setEditingId(item.id);
@@ -232,11 +235,18 @@ const AdminPage = () => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     for (const file of files) {
-      if (!file.type.startsWith('image/')) { toast({ title: 'Invalid file', variant: 'destructive' }); return; }
-      if (file.size > 5 * 1024 * 1024) { toast({ title: 'File too large', variant: 'destructive' }); return; }
+      if (!file.type.startsWith('image/')) {
+        toast({ title: 'Invalid file', description: 'Please select image files only', variant: 'destructive' });
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        toast({ title: 'File too large', description: 'Maximum size is 5MB per image', variant: 'destructive' });
+        return;
+      }
     }
     setImageFiles((prev) => [...prev, ...files]);
-    setImagePreviews((prev) => [...prev, ...files.map((f) => URL.createObjectURL(f))]);
+    const newPreviews = files.map((f) => URL.createObjectURL(f));
+    setImagePreviews((prev) => [...prev, ...newPreviews]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -269,31 +279,43 @@ const AdminPage = () => {
         allImageUrls = [...allImageUrls, ...uploaded];
         setUploading(false);
       } catch (err: any) {
-        setUploading(false); setSaving(false);
+        setUploading(false);
+        setSaving(false);
         toast({ title: 'Upload failed', description: err.message, variant: 'destructive' });
         return;
       }
     }
-    const payload = { name: form.name, description: form.description, price: parseInt(form.price) || 0, image: allImageUrls[0] || '', images: allImageUrls, category: form.category, brand_id: brand.id };
+    const payload = {
+      name: form.name,
+      description: form.description,
+      price: parseInt(form.price) || 0,
+      image: allImageUrls[0] || '',
+      images: allImageUrls,
+      category: form.category,
+    };
     let error;
     if (editingId) {
       ({ error } = await supabase.from('menu_items').update(payload).eq('id', editingId));
     } else {
-      ({ error } = await supabase.from('menu_items').insert(payload as any));
+      ({ error } = await supabase.from('menu_items').insert(payload));
     }
     setSaving(false);
-    if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); } else {
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } else {
       toast({ title: editingId ? 'Item updated' : 'Item created' });
-      queryClient.invalidateQueries({ queryKey: ['menu-items', brand.id] });
+      queryClient.invalidateQueries({ queryKey: ['menu-items'] });
       setFormOpen(false);
     }
   };
 
   const handleDelete = async (id: string) => {
     const { error } = await supabase.from('menu_items').delete().eq('id', id);
-    if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); } else {
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } else {
       toast({ title: 'Item deleted' });
-      queryClient.invalidateQueries({ queryKey: ['menu-items', brand.id] });
+      queryClient.invalidateQueries({ queryKey: ['menu-items'] });
     }
   };
 
@@ -303,6 +325,7 @@ const AdminPage = () => {
         upsertSetting.mutateAsync({ key: 'paystack_public_key', value: paystackKey }),
         upsertSetting.mutateAsync({ key: 'whatsapp_number', value: whatsappNumber }),
         upsertSetting.mutateAsync({ key: 'delivery_fee', value: deliveryFee }),
+        upsertSetting.mutateAsync({ key: 'restaurant_name', value: restaurantName }),
       ]);
       toast({ title: 'Settings saved!' });
     } catch (err: any) {
@@ -310,32 +333,8 @@ const AdminPage = () => {
     }
   };
 
-  const handleSaveBrandSettings = async () => {
-    const { error } = await supabase.from('brands').update({
-      description: brandDescription,
-      about_text: brandAbout,
-      theme: brandTheme,
-      hero_image_url: brandHeroImage,
-      fulfillment_options: { delivery: fulfillmentDelivery, pickup: fulfillmentPickup, reservation: fulfillmentReservation },
-    } as any).eq('id', brand.id);
-    if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); } else {
-      toast({ title: 'Website settings saved! 🎨' });
-      queryClient.invalidateQueries({ queryKey: ['brand'] });
-      queryClient.invalidateQueries({ queryKey: ['my-brand'] });
-    }
-  };
-
-  const handleUpdateReservation = async (id: string, status: string) => {
-    const { error } = await supabase.from('reservations').update({ status } as any).eq('id', id);
-    if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); } else {
-      toast({ title: `Reservation ${status}` });
-      queryClient.invalidateQueries({ queryKey: ['brand-reservations'] });
-    }
-  };
-
   const activeOrders = orders.filter((o) => o.status !== 'delivered');
   const completedOrders = orders.filter((o) => o.status === 'delivered');
-  const totalRevenue = orders.reduce((s, o) => s + (o.total || 0), 0);
 
   return (
     <div className="min-h-screen py-8">
@@ -343,45 +342,18 @@ const AdminPage = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Shield className="h-6 w-6 text-primary" />
-            <div>
-              <h1 className="font-serif text-3xl font-bold">{brand.name}</h1>
-              <p className="text-sm text-muted-foreground">/{brand.slug}</p>
-            </div>
+            <h1 className="font-serif text-3xl font-bold">Admin Dashboard</h1>
           </div>
-          <div className="flex gap-2">
-            <a href={`/${brand.slug}`} target="_blank" rel="noopener noreferrer">
-              <Button variant="outline" size="sm" className="gap-1"><Eye className="h-4 w-4" /> View Site</Button>
-            </a>
-            <Button variant="outline" size="sm" onClick={signOut} className="gap-1"><LogOut className="h-4 w-4" /> Sign Out</Button>
-          </div>
-        </div>
-
-        {/* Summary cards */}
-        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Card><CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold">{orders.length}</div>
-            <div className="text-xs text-muted-foreground">Total Orders</div>
-          </CardContent></Card>
-          <Card><CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-primary">{formatPrice(totalRevenue)}</div>
-            <div className="text-xs text-muted-foreground">Revenue</div>
-          </CardContent></Card>
-          <Card><CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold">{customerCount}</div>
-            <div className="text-xs text-muted-foreground">Customers</div>
-          </CardContent></Card>
-          <Card><CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold">{menuItems.length}</div>
-            <div className="text-xs text-muted-foreground">Menu Items</div>
-          </CardContent></Card>
+          <Button variant="outline" size="sm" onClick={signOut} className="gap-1">
+            <LogOut className="h-4 w-4" /> Sign Out
+          </Button>
         </div>
 
         <Tabs defaultValue="orders" className="mt-6">
           <TabsList className="flex-wrap">
             <TabsTrigger value="orders">Orders</TabsTrigger>
-            <TabsTrigger value="menu">Menu</TabsTrigger>
-            <TabsTrigger value="reservations" className="gap-1"><CalendarDays className="h-4 w-4" /> Reservations</TabsTrigger>
-            <TabsTrigger value="website" className="gap-1"><Palette className="h-4 w-4" /> Website</TabsTrigger>
+            <TabsTrigger value="menu">Menu Items</TabsTrigger>
+            <TabsTrigger value="users" className="gap-1" onClick={fetchUsers}><Users className="h-4 w-4" /> Users</TabsTrigger>
             <TabsTrigger value="settings" className="gap-1"><Settings className="h-4 w-4" /> Settings</TabsTrigger>
           </TabsList>
 
@@ -393,10 +365,12 @@ const AdminPage = () => {
               <>
                 <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
                   {['pending', 'processing', 'out-for-delivery', 'delivered'].map((status) => (
-                    <Card key={status}><CardContent className="p-4 text-center">
-                      <div className="text-2xl font-bold">{orders.filter((o) => o.status === status).length}</div>
-                      <div className="text-xs text-muted-foreground">{statusLabels[status]}</div>
-                    </CardContent></Card>
+                    <Card key={status}>
+                      <CardContent className="p-4 text-center">
+                        <div className="text-2xl font-bold">{orders.filter((o) => o.status === status).length}</div>
+                        <div className="text-xs text-muted-foreground">{statusLabels[status]}</div>
+                      </CardContent>
+                    </Card>
                   ))}
                 </div>
 
@@ -405,35 +379,37 @@ const AdminPage = () => {
                   {activeOrders.length === 0 && <p className="py-8 text-center text-muted-foreground">No active orders 🎉</p>}
                   {activeOrders.map((order, i) => (
                     <motion.div key={order.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
-                      <Card><CardContent className="p-5">
-                        <div className="flex flex-wrap items-start justify-between gap-4">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3">
-                              <Package className="h-5 w-5 text-muted-foreground" />
-                              <span className="font-semibold">{order.order_number}</span>
-                              <Badge className={statusColors[order.status]}>{statusLabels[order.status]}</Badge>
-                              <Badge variant="outline">{order.fulfillment}</Badge>
+                      <Card>
+                        <CardContent className="p-5">
+                          <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3">
+                                <Package className="h-5 w-5 text-muted-foreground" />
+                                <span className="font-semibold">{order.order_number}</span>
+                                <Badge className={statusColors[order.status]}>{statusLabels[order.status]}</Badge>
+                              </div>
+                              <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+                                <p>👤 {order.customer_name} · 📞 {order.customer_phone}</p>
+                                <p>📧 {order.customer_email}</p>
+                                <p>📍 {order.customer_address}</p>
+                                <p>🕐 {new Date(order.created_at).toLocaleString()}</p>
+                              </div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {(order.items || []).map((item: any, idx: number) => (
+                                  <span key={idx} className="rounded-full bg-secondary px-3 py-1 text-xs">{item.name} × {item.quantity}</span>
+                                ))}
+                              </div>
+                              <p className="mt-2 text-lg font-bold text-primary">{formatPrice(order.total)}</p>
                             </div>
-                            <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                              <p>👤 {order.customer_name} · 📞 {order.customer_phone}</p>
-                              <p>📧 {order.customer_email}</p>
-                              {order.customer_address !== 'Pickup' && <p>📍 {order.customer_address}</p>}
-                              <p>🕐 {new Date(order.created_at).toLocaleString()}</p>
-                            </div>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {(order.items || []).map((item: any, idx: number) => (
-                                <span key={idx} className="rounded-full bg-secondary px-3 py-1 text-xs">{item.name} × {item.quantity}</span>
-                              ))}
-                            </div>
-                            <p className="mt-2 text-lg font-bold text-primary">{formatPrice(order.total)}</p>
+                            {nextStatus[order.status] && (
+                              <Button onClick={() => handleAdvance(order)} className="gap-1 shrink-0">
+                                {nextActionLabel[order.status]}
+                                <ChevronRight className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
-                          {nextStatus[order.status] && (
-                            <Button onClick={() => handleAdvance(order)} className="gap-1 shrink-0">
-                              {nextActionLabel[order.status]}<ChevronRight className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </CardContent></Card>
+                        </CardContent>
+                      </Card>
                     </motion.div>
                   ))}
                 </div>
@@ -443,13 +419,15 @@ const AdminPage = () => {
                     <h2 className="mt-10 font-serif text-xl font-bold">Completed ({completedOrders.length})</h2>
                     <div className="mt-4 space-y-3">
                       {completedOrders.map((order) => (
-                        <Card key={order.id} className="opacity-70"><CardContent className="flex items-center justify-between p-4">
-                          <div>
-                            <span className="font-semibold">{order.order_number}</span>
-                            <span className="ml-3 text-sm text-muted-foreground">{order.customer_name} · {formatPrice(order.total)}</span>
-                          </div>
-                          <Badge className={statusColors.delivered}>{statusLabels.delivered}</Badge>
-                        </CardContent></Card>
+                        <Card key={order.id} className="opacity-70">
+                          <CardContent className="flex items-center justify-between p-4">
+                            <div>
+                              <span className="font-semibold">{order.order_number}</span>
+                              <span className="ml-3 text-sm text-muted-foreground">{order.customer_name} · {formatPrice(order.total)}</span>
+                            </div>
+                            <Badge className={statusColors.delivered}>{statusLabels.delivered}</Badge>
+                          </CardContent>
+                        </Card>
                       ))}
                     </div>
                   </>
@@ -458,7 +436,7 @@ const AdminPage = () => {
             )}
           </TabsContent>
 
-          {/* MENU TAB */}
+          {/* MENU ITEMS TAB */}
           <TabsContent value="menu">
             <div className="mt-4 flex items-center justify-between">
               <h2 className="font-serif text-xl font-bold">Menu Items ({menuItems.length})</h2>
@@ -467,13 +445,27 @@ const AdminPage = () => {
                   <Button onClick={openCreate} className="gap-1"><Plus className="h-4 w-4" /> Add Item</Button>
                 </DialogTrigger>
                 <DialogContent className="max-h-[90vh] overflow-y-auto">
-                  <DialogHeader><DialogTitle>{editingId ? 'Edit Item' : 'Add New Item'}</DialogTitle></DialogHeader>
+                  <DialogHeader>
+                    <DialogTitle>{editingId ? 'Edit Item' : 'Add New Item'}</DialogTitle>
+                  </DialogHeader>
                   <div className="space-y-4">
-                    <div><Label>Name</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Jollof Rice" /></div>
-                    <div><Label>Description</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="A short description" /></div>
+                    <div>
+                      <Label>Name</Label>
+                      <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Jollof Rice" />
+                    </div>
+                    <div>
+                      <Label>Description</Label>
+                      <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="A short description" />
+                    </div>
                     <div className="grid grid-cols-2 gap-4">
-                      <div><Label>Price (₦)</Label><Input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="3500" /></div>
-                      <div><Label>Category</Label><Input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Main Dishes" /></div>
+                      <div>
+                        <Label>Price (₦)</Label>
+                        <Input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="3500" />
+                      </div>
+                      <div>
+                        <Label>Category</Label>
+                        <Input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Main Dishes" />
+                      </div>
                     </div>
                     <div>
                       <Label>Images</Label>
@@ -483,7 +475,9 @@ const AdminPage = () => {
                           {imagePreviews.map((src, idx) => (
                             <div key={idx} className="relative group">
                               <img src={src} alt={`Preview ${idx + 1}`} className="h-24 w-full rounded-lg object-cover" />
-                              <button type="button" onClick={() => removeImage(idx)} className="absolute top-1 right-1 rounded-full bg-destructive p-1 text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100"><X className="h-3 w-3" /></button>
+                              <button type="button" onClick={() => removeImage(idx)} className="absolute top-1 right-1 rounded-full bg-destructive p-1 text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100">
+                                <X className="h-3 w-3" />
+                              </button>
                             </div>
                           ))}
                         </div>
@@ -503,146 +497,128 @@ const AdminPage = () => {
                 </DialogContent>
               </Dialog>
             </div>
+
             {menuLoading ? (
               <p className="py-8 text-center text-muted-foreground">Loading menu…</p>
             ) : (
               <div className="mt-4 space-y-3">
                 {menuItems.map((item) => (
-                  <Card key={item.id}><CardContent className="flex items-center gap-4 p-4">
-                    <div className="flex gap-1 shrink-0">
-                      {(item.images?.length ? item.images.slice(0, 2) : [item.image]).map((src, i) => (
-                        <img key={i} src={src} alt={item.name} className="h-16 w-16 rounded-lg object-cover" />
-                      ))}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold truncate">{item.name}</span>
-                        <Badge variant="secondary" className="shrink-0">{item.category}</Badge>
+                  <Card key={item.id}>
+                    <CardContent className="flex items-center gap-4 p-4">
+                      <div className="flex gap-1 shrink-0">
+                        {(item.images?.length ? item.images.slice(0, 2) : [item.image]).map((src, i) => (
+                          <img key={i} src={src} alt={item.name} className="h-16 w-16 rounded-lg object-cover" />
+                        ))}
+                        {(item.images?.length || 0) > 2 && (
+                          <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-muted text-xs text-muted-foreground">
+                            +{item.images!.length - 2}
+                          </div>
+                        )}
                       </div>
-                      <p className="text-sm text-muted-foreground truncate">{item.description}</p>
-                      <p className="font-bold text-primary">{formatPrice(item.price)}</p>
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      <Button variant="outline" size="icon" onClick={() => openEdit(item)}><Pencil className="h-4 w-4" /></Button>
-                      <Button variant="outline" size="icon" onClick={() => handleDelete(item.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                    </div>
-                  </CardContent></Card>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold truncate">{item.name}</span>
+                          <Badge variant="secondary" className="shrink-0">{item.category}</Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground truncate">{item.description}</p>
+                        <p className="font-bold text-primary">{formatPrice(item.price)}</p>
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <Button variant="outline" size="icon" onClick={() => openEdit(item)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button variant="outline" size="icon" onClick={() => handleDelete(item.id)}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             )}
           </TabsContent>
 
-          {/* RESERVATIONS TAB */}
-          <TabsContent value="reservations">
+          {/* USERS TAB */}
+          <TabsContent value="users">
             <div className="mt-4">
-              <h2 className="font-serif text-xl font-bold mb-4">Reservations ({reservations.length})</h2>
-              {reservations.length === 0 ? (
-                <p className="py-8 text-center text-muted-foreground">No reservations yet. Enable reservations in the Website tab.</p>
+              <div className="flex items-center justify-between">
+                <h2 className="font-serif text-xl font-bold">Registered Users</h2>
+                <Button variant="outline" size="sm" onClick={fetchUsers} disabled={usersLoading}>
+                  {usersLoading ? 'Loading…' : 'Refresh'}
+                </Button>
+              </div>
+              {usersLoading ? (
+                <p className="py-8 text-center text-muted-foreground">Loading users…</p>
+              ) : appUsers.length === 0 ? (
+                <p className="py-8 text-center text-muted-foreground">No registered users yet</p>
               ) : (
-                <div className="space-y-3">
-                  {reservations.map((res: any) => (
-                    <Card key={res.id}><CardContent className="p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-4">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold">{res.customer_name}</span>
-                            <Badge variant={res.status === 'confirmed' ? 'default' : res.status === 'cancelled' ? 'destructive' : 'secondary'}>
-                              {res.status}
-                            </Badge>
+                <div className="mt-4 space-y-3">
+                  {appUsers.map((u) => {
+                    const isBanned = u.banned_until && new Date(u.banned_until) > new Date();
+                    return (
+                      <Card key={u.id}>
+                        <CardContent className="flex items-center justify-between p-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold">{u.user_metadata?.full_name || 'No name'}</span>
+                              {isBanned && <Badge variant="destructive">Disabled</Badge>}
+                              {!isBanned && new Date(u.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) && (
+                                <Badge className="bg-accent text-accent-foreground">New</Badge>
+                              )}
+                            </div>
+                            <p className="text-sm text-muted-foreground">{u.email || u.phone}</p>
+                            <p className="text-xs text-muted-foreground">Joined {new Date(u.created_at).toLocaleDateString()}</p>
                           </div>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            📅 {res.reservation_date} at {res.reservation_time} · 👥 {res.party_size} guests
-                          </p>
-                          {res.customer_phone && <p className="text-sm text-muted-foreground">📞 {res.customer_phone}</p>}
-                          {res.notes && <p className="text-sm text-muted-foreground mt-1">📝 {res.notes}</p>}
-                        </div>
-                        {res.status === 'pending' && (
-                          <div className="flex gap-2">
-                            <Button size="sm" onClick={() => handleUpdateReservation(res.id, 'confirmed')}>Confirm</Button>
-                            <Button size="sm" variant="outline" onClick={() => handleUpdateReservation(res.id, 'cancelled')}>Decline</Button>
-                          </div>
-                        )}
-                      </div>
-                    </CardContent></Card>
-                  ))}
+                          <Button
+                            variant={isBanned ? 'default' : 'destructive'}
+                            size="sm"
+                            className="gap-1"
+                            onClick={() => toggleUserDisabled(u.id, !isBanned)}
+                          >
+                            {isBanned ? <><UserCheck className="h-4 w-4" /> Enable</> : <><UserX className="h-4 w-4" /> Disable</>}
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
                 </div>
               )}
-            </div>
-          </TabsContent>
-
-          {/* WEBSITE TAB */}
-          <TabsContent value="website">
-            <div className="mt-4 max-w-lg space-y-6">
-              <Card><CardContent className="p-6 space-y-4">
-                <h3 className="font-serif text-lg font-semibold">Website Theme</h3>
-                <div>
-                  <Label>Theme</Label>
-                  <Select value={brandTheme} onValueChange={setBrandTheme}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="classic">🍽️ Classic</SelectItem>
-                      <SelectItem value="modern">✨ Modern</SelectItem>
-                      <SelectItem value="elegant">🌟 Elegant</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Description</Label>
-                  <Textarea value={brandDescription} onChange={(e) => setBrandDescription(e.target.value)} placeholder="Short tagline for your restaurant" />
-                </div>
-                <div>
-                  <Label>About Us</Label>
-                  <Textarea value={brandAbout} onChange={(e) => setBrandAbout(e.target.value)} placeholder="Tell your story..." rows={4} />
-                </div>
-                <div>
-                  <Label>Hero Image URL</Label>
-                  <Input value={brandHeroImage} onChange={(e) => setBrandHeroImage(e.target.value)} placeholder="https://..." />
-                </div>
-              </CardContent></Card>
-
-              <Card><CardContent className="p-6 space-y-4">
-                <h3 className="font-serif text-lg font-semibold">Fulfillment Options</h3>
-                <p className="text-sm text-muted-foreground">Choose what services you offer to customers</p>
-                <div className="flex items-center justify-between">
-                  <Label>🚗 Delivery</Label>
-                  <Switch checked={fulfillmentDelivery} onCheckedChange={setFulfillmentDelivery} />
-                </div>
-                <div className="flex items-center justify-between">
-                  <Label>🏪 Pickup</Label>
-                  <Switch checked={fulfillmentPickup} onCheckedChange={setFulfillmentPickup} />
-                </div>
-                <div className="flex items-center justify-between">
-                  <Label>📅 Table Reservation</Label>
-                  <Switch checked={fulfillmentReservation} onCheckedChange={setFulfillmentReservation} />
-                </div>
-              </CardContent></Card>
-
-              <Button onClick={handleSaveBrandSettings} className="w-full">Save Website Settings</Button>
             </div>
           </TabsContent>
 
           {/* SETTINGS TAB */}
           <TabsContent value="settings">
             <div className="mt-4 max-w-lg space-y-6">
-              <Card><CardContent className="p-6 space-y-4">
-                <h3 className="font-serif text-lg font-semibold">Restaurant Settings</h3>
-                <div>
-                  <Label htmlFor="whatsapp-number">WhatsApp Number</Label>
-                  <Input id="whatsapp-number" value={whatsappNumber} onChange={(e) => setWhatsappNumber(e.target.value)} placeholder="2347089989283" className="mt-1" />
-                  <p className="mt-1 text-xs text-muted-foreground">Include country code without + (e.g. 2347089989283)</p>
-                </div>
-                <div>
-                  <Label htmlFor="delivery-fee">Delivery Fee (₦)</Label>
-                  <Input id="delivery-fee" type="number" value={deliveryFee} onChange={(e) => setDeliveryFee(e.target.value)} placeholder="500" className="mt-1" />
-                </div>
-              </CardContent></Card>
-              <Card><CardContent className="p-6 space-y-4">
-                <h3 className="font-serif text-lg font-semibold">Payment Settings</h3>
-                <div>
-                  <Label htmlFor="paystack-key">Paystack Public Key</Label>
-                  <Input id="paystack-key" value={paystackKey} onChange={(e) => setPaystackKey(e.target.value)} placeholder="pk_test_..." className="mt-1 font-mono text-sm" />
-                </div>
-              </CardContent></Card>
+              <Card>
+                <CardContent className="p-6 space-y-4">
+                  <h3 className="font-serif text-lg font-semibold">Restaurant Settings</h3>
+                  <div>
+                    <Label htmlFor="restaurant-name">Restaurant Name</Label>
+                    <Input id="restaurant-name" value={restaurantName} onChange={(e) => setRestaurantName(e.target.value)} placeholder="Bellefood" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label htmlFor="whatsapp-number">WhatsApp Number</Label>
+                    <Input id="whatsapp-number" value={whatsappNumber} onChange={(e) => setWhatsappNumber(e.target.value)} placeholder="2347089989283" className="mt-1" />
+                    <p className="mt-1 text-xs text-muted-foreground">Include country code without + (e.g. 2347089989283)</p>
+                  </div>
+                  <div>
+                    <Label htmlFor="delivery-fee">Delivery Fee (₦)</Label>
+                    <Input id="delivery-fee" type="number" value={deliveryFee} onChange={(e) => setDeliveryFee(e.target.value)} placeholder="500" className="mt-1" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-6 space-y-4">
+                  <h3 className="font-serif text-lg font-semibold">Payment Settings</h3>
+                  <div>
+                    <Label htmlFor="paystack-key">Paystack Public Key</Label>
+                    <Input id="paystack-key" value={paystackKey} onChange={(e) => setPaystackKey(e.target.value)} placeholder="pk_test_..." className="mt-1 font-mono text-sm" />
+                    <p className="mt-1 text-xs text-muted-foreground">Find this in your Paystack dashboard under Settings → API Keys & Webhooks.</p>
+                  </div>
+                </CardContent>
+              </Card>
+
               <Button onClick={handleSaveSettings} disabled={upsertSetting.isPending} className="w-full">
                 {upsertSetting.isPending ? 'Saving…' : 'Save All Settings'}
               </Button>

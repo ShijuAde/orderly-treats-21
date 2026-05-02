@@ -13,6 +13,8 @@ const Navbar = () => {
   const { user } = useAuth();
 
   const links = [
+    { to: '/', label: 'Home' },
+    { to: '/menu', label: 'Menu' },
     { to: '/reviews', label: 'Reviews' },
   ];
 

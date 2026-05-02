@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, Eye, EyeOff, Store } from 'lucide-react';
+import { User, Mail, Phone, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,7 +12,6 @@ import { supabase } from '@/integrations/supabase/client';
 
 const AuthPage = () => {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [signupType, setSignupType] = useState<'customer' | 'restaurant'>('customer');
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -28,7 +27,7 @@ const AuthPage = () => {
 
   const handleEmailSignup = async () => {
     setLoading(true);
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -39,16 +38,6 @@ const AuthPage = () => {
     setLoading(false);
     if (error) {
       toast({ title: 'Signup failed', description: error.message, variant: 'destructive' });
-      return;
-    }
-
-    if (signupType === 'restaurant' && data.user) {
-      // Upgrade role via edge function
-      const { error: roleError } = await supabase.functions.invoke('restaurant-signup');
-      if (roleError) {
-        console.error('Role upgrade failed:', roleError);
-      }
-      toast({ title: 'Account created!', description: 'Please check your email to verify, then set up your restaurant.' });
     } else {
       toast({ title: 'Check your email!', description: 'We sent a verification link to confirm your account.' });
     }
@@ -62,8 +51,7 @@ const AuthPage = () => {
       toast({ title: 'Login failed', description: error.message, variant: 'destructive' });
     } else {
       toast({ title: 'Welcome back!' });
-      // Role-based redirect happens in useEffect via the account page or admin
-      navigate('/account');
+      navigate('/');
     }
   };
 
@@ -99,14 +87,14 @@ const AuthPage = () => {
     const { error } = await supabase.auth.verifyOtp({
       phone,
       token: otp,
-      type: 'sms',
+      type: mode === 'signup' ? 'sms' : 'sms',
     });
     setLoading(false);
     if (error) {
       toast({ title: 'Verification failed', description: error.message, variant: 'destructive' });
     } else {
       toast({ title: 'Welcome!' });
-      navigate('/account');
+      navigate('/');
     }
   };
 
@@ -172,28 +160,6 @@ const AuthPage = () => {
               </Button>
             </div>
 
-            {/* Signup type selector */}
-            {mode === 'signup' && (
-              <div className="flex gap-2">
-                <Button
-                  variant={signupType === 'customer' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  className="flex-1 gap-1"
-                  onClick={() => setSignupType('customer')}
-                >
-                  <User className="h-3 w-3" /> Customer
-                </Button>
-                <Button
-                  variant={signupType === 'restaurant' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  className="flex-1 gap-1"
-                  onClick={() => setSignupType('restaurant')}
-                >
-                  <Store className="h-3 w-3" /> Restaurant
-                </Button>
-              </div>
-            )}
-
             {/* Auth method tabs */}
             <Tabs value={authMethod} onValueChange={(v) => { setAuthMethod(v as any); setOtpSent(false); }}>
               <TabsList className="w-full">
@@ -235,7 +201,7 @@ const AuthPage = () => {
                   disabled={loading}
                   onClick={mode === 'signup' ? handleEmailSignup : handleEmailLogin}
                 >
-                  {loading ? 'Please wait…' : mode === 'signup' ? (signupType === 'restaurant' ? 'Create Restaurant Account' : 'Sign Up') : 'Login'}
+                  {loading ? 'Please wait…' : mode === 'signup' ? 'Sign Up' : 'Login'}
                 </Button>
                 {mode === 'login' && (
                   <Button variant="link" className="w-full text-sm" onClick={() => setResetMode(true)}>
